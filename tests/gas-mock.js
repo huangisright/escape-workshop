@@ -1,4 +1,4 @@
-// platform/tests/gas-mock.js
+// tests/gas-mock.js
 // 在 Node 或瀏覽器裡模擬 Google Apps Script 的服務（試算表、雲端硬碟、屬性、快取、鎖…），
 // 讓 Code.gs 不用部署就能測試。只實作 Code.gs 用到的部分。
 //

@@ -100,8 +100,8 @@
 `tests/` 裡用模擬的 Google 服務（試算表、雲端硬碟等）在電腦上跑 `Code.gs`，不用部署：
 
 ```
-node --test platform/tests/backend.test.js platform/tests/climate.test.js   # 後端
-node --test platform/tests/ui.test.js                                        # 介面（需要 Playwright 與 Chromium）
+node --test tests/backend.test.js tests/climate.test.js   # 後端
+node --test tests/ui.test.js                                        # 介面（需要 Playwright 與 Chromium）
 ```
 
 - `backend.test.js`：v4 原有的流程（代碼、謎題卡檢核、送審、上傳、發布凍結、遊玩、數據、匯出）。

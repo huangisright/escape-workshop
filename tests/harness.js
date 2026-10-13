@@ -1,4 +1,4 @@
-// platform/tests/harness.js
+// tests/harness.js
 // 把 Index.html 包成可以在一般瀏覽器開的頁面：
 // 同一頁裡跑 GAS 模擬服務 + Code.gs，google.script.run 改成直接呼叫 Code.gs 的函式（非同步、經過 JSON 序列化，跟真的一樣）。
 const fs = require('fs');

@@ -1,4 +1,4 @@
-// 介面測試（Playwright + Chromium）：node --test platform/tests/ui.test.js
+// 介面測試（Playwright + Chromium）：node --test tests/ui.test.js
 // 截圖存到環境變數 SHOTS 指定的資料夾（沒設就不存）。
 const test = require('node:test');
 const assert = require('node:assert/strict');

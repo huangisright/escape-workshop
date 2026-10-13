@@ -1,4 +1,4 @@
-// 後端測試：node --test platform/tests/
+// 後端測試：node --test tests/
 // 這一檔測 v4 原有的流程（代碼、謎題卡、檢核、送審、發布、遊玩、數據、匯出）。
 const test = require('node:test');
 const assert = require('node:assert/strict');

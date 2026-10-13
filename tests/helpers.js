@@ -1,4 +1,4 @@
-// platform/tests/helpers.js — 建立測試資料的捷徑
+// tests/helpers.js — 建立測試資料的捷徑
 const { load } = require('./load');
 
 function fullPuzzle(over) {

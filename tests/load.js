@@ -1,4 +1,4 @@
-// platform/tests/load.js
+// tests/load.js
 // 在 Node 的隔離環境裡載入 GAS 模擬服務與 Code.gs，回傳可呼叫的後端與可控制的時鐘。
 const fs = require('fs');
 const path = require('path');

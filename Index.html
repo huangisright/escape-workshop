@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#f4f1ea;--card:#fff;--ink:#22252a;--muted:#6b6f76;--line:#e2ddd2;--acc:#1f6f6b;--acc2:#e7f2f1;--err:#c0392b;--errbg:#fdecea;--warn:#b7791f;--warnbg:#fdf4e3;--ok:#2f855a;--okbg:#e9f6ee;--r:12px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;font-size:16px;line-height:1.6}
+button,input,select,textarea{font:inherit}
+.top{position:sticky;top:0;z-index:20;background:#22252a;color:#fff;display:flex;align-items:center;gap:12px;padding:10px 16px;flex-wrap:wrap}
+.top .brand{font-weight:700;letter-spacing:.05em}
+.top .who{opacity:.8;font-size:14px}
+.top .sp{flex:1}
+.top button{background:transparent;color:#fff;border:1px solid #fff5;border-radius:8px;padding:6px 12px;cursor:pointer}
+.status{font-size:13px;opacity:.85}
+.wrap{max-width:980px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin:0 0 14px}
+.card h3{margin:0 0 10px;font-size:18px}
+.card h3 .no{display:inline-block;width:26px;height:26px;border-radius:50%;background:var(--acc);color:#fff;text-align:center;line-height:26px;font-size:14px;margin-right:6px}
+.help{color:var(--muted);font-size:14px;margin:0 0 10px}
+label.f{display:block;font-size:14px;color:var(--muted);margin:10px 0 4px}
+input[type=text],input[type=number],input[type=url],textarea,select{width:100%;padding:10px 12px;border:1px solid #cfc9bd;border-radius:10px;background:#fff;color:var(--ink)}
+input:disabled,textarea:disabled,select:disabled{background:#f3f1ec;color:#555}
+textarea{min-height:84px;resize:vertical}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.row>*{flex:1;min-width:140px}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--acc);background:var(--acc);color:#fff;border-radius:10px;padding:10px 16px;cursor:pointer;font-weight:600}
+.btn.ghost{background:#fff;color:var(--acc)}
+.btn.sm{padding:6px 10px;font-size:14px;font-weight:500}
+.btn.danger{background:#fff;color:var(--err);border-color:var(--err)}
+.btn.warn{background:var(--warn);border-color:var(--warn)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.seg{display:inline-flex;border:1px solid var(--acc);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:#fff;color:var(--acc);padding:9px 18px;cursor:pointer}
+.seg button.on{background:var(--acc);color:#fff}
+.chip{display:inline-block;font-size:13px;padding:2px 10px;border-radius:99px;background:#eee;color:#444;white-space:nowrap}
+.chip.draft{background:#eef1f5;color:#3b4a5e}.chip.submitted{background:var(--warnbg);color:var(--warn)}.chip.approved{background:var(--okbg);color:var(--ok)}
+.chip.pub{background:var(--acc2);color:var(--acc)}
+.dots{display:inline-flex;gap:6px;align-items:center;font-size:13px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dot.err{background:var(--err)}.dot.warn{background:#e0a72e}.dot.ok{background:var(--ok)}
+.checks{list-style:none;padding:0;margin:0}
+.checks li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:15px}
+.checks li .dot{margin-top:7px;flex:none}
+.checks li.err{color:var(--err)}.checks li.warn{color:#8a5a12}.checks li.ok{color:var(--ok)}
+.sub{border:1px dashed var(--line);border-radius:10px;padding:12px;margin:10px 0;background:#fcfbf8}
+.sub .hd{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:600}
+.sub .hd .sp{flex:1}
+.iconbtn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 9px;cursor:pointer;font-size:14px}
+.thumb{max-width:260px;max-height:180px;border-radius:8px;border:1px solid var(--line);display:block;margin:6px 0;background:#eee;min-height:40px}
+.list{display:flex;flex-direction:column;gap:10px}
+.item{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.item .main{flex:1;min-width:0}
+.item .t{font-weight:600}
+.item .m{font-size:14px;color:var(--muted)}
+.item.click{cursor:pointer}
+.item.click:hover{border-color:var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+.banner{border-radius:12px;padding:12px 16px;margin-bottom:14px;background:var(--warnbg);color:#7a4f0f;border:1px solid #f1d9a8}
+.banner.ok{background:var(--okbg);color:var(--ok);border-color:#bfe3cc}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
+.tabs button{border:0;background:transparent;padding:10px 14px;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;font-size:16px}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.center{text-align:center}
+.big{font-size:28px;font-weight:700;letter-spacing:.1em}
+.login{max-width:440px;margin:8vh auto;padding:0 16px}
+.login h1{font-size:30px;margin:0 0 6px}
+.login .card{padding:22px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:8px;align-items:center}
+#toast div{background:#22252a;color:#fff;padding:10px 18px;border-radius:10px;max-width:90vw;box-shadow:0 4px 18px #0003}
+#toast div.err{background:var(--err)}
+.mask{position:fixed;inset:0;background:#0007;z-index:50;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:30px 12px}
+.dlg{background:#fff;border-radius:14px;max-width:760px;width:100%;padding:20px;position:relative}
+.dlg .x{position:absolute;right:12px;top:10px;border:0;background:transparent;font-size:24px;cursor:pointer}
+.qr{display:inline-block;padding:8px;background:#fff}
+.muted{color:var(--muted)}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:4px 12px;font-size:15px}
+.pre{white-space:pre-wrap}
+.step{display:grid;grid-template-columns:28px 1fr 1fr 1fr 1fr 34px;gap:6px;align-items:start;margin-bottom:8px}
+.step .n{font-weight:700;color:var(--acc);padding-top:10px;text-align:center}
+.step-h{display:grid;grid-template-columns:28px 1fr 1fr 1fr 1fr 34px;gap:6px;font-size:13px;color:var(--muted)}
+@media(max-width:700px){.step,.step-h{grid-template-columns:1fr}.step-h{display:none}.step .n{text-align:left}}
+/* 玩家 */
+body.playing{background:#12161b;color:#eef0f2}
+.play{max-width:900px;margin:0 auto;padding:16px}
+.play .bar{display:flex;align-items:center;gap:12px;color:#b9c0c8;padding:6px 0 10px}
+.play .bar .sp{flex:1}
+.play .timer{font-size:26px;font-variant-numeric:tabular-nums;color:#f3c969;font-weight:700}
+.play .timer.low{color:#ff7b6b}
+.pcard{background:#1c222a;border:1px solid #2b343f;border-radius:14px;padding:20px;margin-bottom:14px}
+.pcard h2{margin:0 0 12px;font-size:24px}
+.pcard .txt{white-space:pre-wrap;font-size:18px;line-height:1.75}
+.pcard img{max-width:100%;border-radius:10px;display:block;margin:10px 0}
+.pcard audio{width:100%;margin:10px 0}
+.pcard iframe{width:100%;border:0;border-radius:10px;background:#fff;margin:10px 0}
+.pcard .cap{color:#aab3bd;font-size:15px}
+.pcard a{color:#9cc9ff}
+.pin{width:100%;font-size:24px;padding:14px;border-radius:12px;border:1px solid #3a4552;background:#0e1216;color:#fff;letter-spacing:.05em}
+.pbtn{font-size:19px;padding:13px 22px;border-radius:12px;border:0;background:#f3c969;color:#1b1b1b;cursor:pointer;font-weight:700;margin-top:10px}
+.pbtn.ghost{background:transparent;color:#f3c969;border:1px solid #f3c969;font-weight:500}
+.pbtn:disabled{opacity:.4;cursor:not-allowed}
+.pmsg{min-height:28px;margin-top:10px;font-size:17px}
+.pmsg.bad{color:#ff9b8a}.pmsg.good{color:#8fe0a6}
+.phint{border-left:3px solid #f3c969;padding:6px 12px;margin:10px 0;color:#f6e3b3;white-space:pre-wrap}
+.gate{color:#f3c969;font-size:15px;margin-bottom:8px}
+.stars button{font-size:28px;background:transparent;border:0;color:#5a6470;cursor:pointer;padding:2px}
+.stars button.on{color:#f3c969}
+.play textarea{background:#0e1216;color:#fff;border:1px solid #3a4552}
+.flash{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0b0e12e6;z-index:60;font-size:40px;font-weight:800;color:#8fe0a6}
+.testtag{background:#f3c969;color:#222;border-radius:6px;padding:1px 8px;font-size:13px}
+/* 列印 */
+.printonly{display:none}
+@media print{.top,.noprint,#toast{display:none!important}.printonly{display:block}body{background:#fff}.card{break-inside:avoid;border-color:#999}.wrap{max-width:none;padding:0}}
+.qrsheet{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.qrsheet .cell{border:1px solid #999;border-radius:10px;padding:12px;text-align:center;break-inside:avoid}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<div id="modal"></div>
+<script>
+/* ============================================================
+   共用
+   ============================================================ */
+var S = {
+  code: null, me: null, view: '', target: '', puzzle: null, room: null, ws: null, edit: {},
+  fileCache: {}, admin: { tab: 'overview', data: null }, play: null, saver: null, timers: []
+};
+var app = document.getElementById('app');
+
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function api(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (res, rej) {
+    var r = google.script.run.withSuccessHandler(res).withFailureHandler(function (e) {
+      rej(e && e.message ? e : new Error(String(e)));
+    });
+    r[fn].apply(r, args);
+  });
+}
+function toast(msg, kind) {
+  var t = document.createElement('div');
+  t.textContent = msg;
+  if (kind) t.className = kind;
+  document.getElementById('toast').appendChild(t);
+  setTimeout(function () { t.remove(); }, kind === 'err' ? 5000 : 2600);
+}
+function fail(e) { toast((e && e.message) || String(e), 'err'); }
+function modal(html, onClose) {
+  var m = document.getElementById('modal');
+  m.innerHTML = '<div class="mask"><div class="dlg"><button class="x" data-act="closeModal" aria-label="關閉">×</button>' + html + '</div></div>';
+  S.onModalClose = onClose || null;
+  return m.querySelector('.dlg');
+}
+function closeModal() {
+  document.getElementById('modal').innerHTML = '';
+  if (S.onModalClose) { var f = S.onModalClose; S.onModalClose = null; f(); }
+}
+function confirmBox(msg, okText) {
+  return new Promise(function (res) {
+    var d = modal('<p style="font-size:17px;margin-top:20px" class="pre">' + esc(msg) + '</p><div class="btns"><button class="btn" id="cfOk">' + esc(okText || '確定') + '</button><button class="btn ghost" id="cfNo">取消</button></div>', function () { res(false); });
+    d.querySelector('#cfOk').onclick = function () { S.onModalClose = null; closeModal(); res(true); };
+    d.querySelector('#cfNo').onclick = function () { closeModal(); };
+  });
+}
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
+function clearTimers() { S.timers.forEach(clearInterval); S.timers = []; }
+function getPath(o, path) { return path.split('.').reduce(function (x, k) { return x == null ? x : x[k]; }, o); }
+function setPath(o, path, v) {
+  var ks = path.split('.'), last = ks.pop();
+  var t = ks.reduce(function (x, k) { if (x[k] == null) x[k] = /^\d+$/.test(k) ? [] : {}; return x[k]; }, o);
+  t[last] = v;
+}
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+function norm(s) {
+  s = String(s == null ? '' : s);
+  try { s = s.normalize('NFKC'); } catch (e) { }
+  s = s.replace(/[！-～]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }).replace(/　/g, ' ');
+  return s.toLowerCase().replace(/臺/g, '台').replace(/[\s，,。．.、；;：:！!？?「」『』“”"'‘’（）()【】\[\]]/g, '');
+}
+function splitAns(s) { return String(s || '').split(/[\/／\n]/).map(function (x) { return x.trim(); }).filter(Boolean); }
+function fmtSec(s) { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }
+function statusChip(st) { return '<span class="chip ' + esc(st) + '">' + ({ draft: '製作中', submitted: '已送審', approved: '審核通過' }[st] || st) + '</span>'; }
+function sumDots(sm) {
+  if (!sm) return '';
+  var h = '<span class="dots">';
+  if (sm.err) h += '<span class="dot err"></span>' + sm.err;
+  if (sm.warn) h += '<span class="dot warn"></span>' + sm.warn;
+  if (!sm.err && !sm.warn) h += '<span class="dot ok"></span>完成';
+  return h + '</span>';
+}
+function summarize(checks) {
+  return { err: (checks || []).filter(function (c) { return c.level === 'err'; }).length, warn: (checks || []).filter(function (c) { return c.level === 'warn'; }).length };
+}
+function checksHtml(checks) {
+  if (!checks || !checks.length) return '';
+  var order = { err: 0, warn: 1, ok: 2 };
+  return '<ul class="checks">' + checks.slice().sort(function (a, b) { return order[a.level] - order[b.level]; }).map(function (c) {
+    return '<li class="' + c.level + '"><span class="dot ' + c.level + '"></span><span>' + esc(c.msg) + '</span></li>';
+  }).join('') + '</ul>';
+}
+function kindLabel(k) { return k === 'digital' ? '數位' : k === 'physical' ? '實體' : '未選'; }
+function topbar(title, opts) {
+  opts = opts || {};
+  return '<div class="top noprint">' + (opts.back ? '<button data-act="' + opts.back + '">← 返回</button>' : '') +
+    '<span class="brand">' + esc(title) + '</span>' + (opts.extra || '') + '<span class="sp"></span>' +
+    (opts.status ? '<span class="status" id="saveStatus"></span>' : '') +
+    '<span class="who">' + esc(S.me ? S.me.name : '') + '</span>' +
+    (S.me ? '<button data-act="logout">登出</button>' : '') + '</div>';
+}
+function setSaveStatus(t) {
+  var e = document.getElementById('saveStatus');
+  if (!e) return;
+  e.textContent = { editing: '編輯中…', saving: '儲存中…', saved: '已自動儲存 ✓', error: '儲存失敗，稍後重試' }[t] || '';
+}
+
+/* 自動儲存 */
+function makeSaver(getData, send, onSaved) {
+  var timer = null, inflight = null, seq = 0, sentSeq = 0;
+  var api_ = {
+    touch: function () { seq++; setSaveStatus('editing'); clearTimeout(timer); timer = setTimeout(api_.flush, 1200); },
+    flush: function () {
+      clearTimeout(timer);
+      var wait = inflight || Promise.resolve();
+      return wait.then(function () {
+        if (seq === sentSeq) return;
+        var my = seq;
+        setSaveStatus('saving');
+        inflight = send(clone(getData())).then(function (r) {
+          sentSeq = my;
+          api_.warned = false;
+          onSaved(r);
+          setSaveStatus(seq === sentSeq ? 'saved' : 'editing');
+          if (seq !== sentSeq) timer = setTimeout(api_.flush, 800);
+        }).catch(function (e) {
+          setSaveStatus('error');
+          if (/送審|權限|只能|太長/.test(e.message || '')) { sentSeq = seq; fail(e); }
+          else { // 網路或同時太多人儲存：自動重試
+            if (!api_.warned) { toast('儲存暫時失敗，系統會自動重試，請先不要關掉頁面', 'err'); api_.warned = true; }
+            clearTimeout(timer); timer = setTimeout(api_.flush, 5000);
+          }
+        }).then(function () { inflight = null; });
+        return inflight;
+      });
+    },
+    pending: function () { return seq !== sentSeq; }
+  };
+  return api_;
+}
+function leaveEditor() {
+  var s = S.saver;
+  S.saver = null;
+  return s ? s.flush() : Promise.resolve();
+}
+
+/* 檔案 */
+function fileData(fileId) {
+  if (S.fileCache[fileId]) return Promise.resolve(S.fileCache[fileId]);
+  return api('getFileData', S.code, fileId).then(function (d) { S.fileCache[fileId] = d; return d; });
+}
+function hydrateFiles(root) {
+  (root || app).querySelectorAll('[data-file]').forEach(function (el) {
+    var id = el.getAttribute('data-file');
+    if (!id) return;
+    fileData(id).then(function (d) { if (d.dataUrl) el.src = d.dataUrl; }).catch(function () { el.alt = '讀取失敗'; });
+  });
+}
+function readAsDataURL(file) {
+  return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(r.result); }; r.onerror = rej; r.readAsDataURL(file); });
+}
+function readAsText(file) {
+  return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(r.result); }; r.onerror = rej; r.readAsText(file, 'UTF-8'); });
+}
+function compressImage(file, maxEdge, quality) {
+  maxEdge = maxEdge || 1400; quality = quality || 0.82;
+  return readAsDataURL(file).then(function (url) {
+    return new Promise(function (res) {
+      var img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, maxEdge / Math.max(w, h));
+        var c = document.createElement('canvas');
+        c.width = Math.round(w * k); c.height = Math.round(h * k);
+        var g = c.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        res(c.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = function () { res(url); };
+      img.src = url;
+    });
+  });
+}
+function b64Of(dataUrl) { return dataUrl.substring(dataUrl.indexOf(',') + 1); }
+
+/** 上傳一般檔案（圖片會先壓縮） */
+function uploadMedia(file, kind, meta) {
+  var p;
+  if (kind === 'image' && /^image\/(jpeg|png|webp|heic|heif|bmp)$/i.test(file.type || 'image/jpeg') && !/gif|svg/i.test(file.type)) {
+    p = compressImage(file).then(function (u) { return { b64: b64Of(u), mime: 'image/jpeg', name: (file.name || 'image').replace(/\.\w+$/, '') + '.jpg' }; });
+  } else {
+    if (file.size > 8 * 1024 * 1024) return Promise.reject(new Error('檔案超過 8 MB，請先壓縮'));
+    p = readAsDataURL(file).then(function (u) { return { b64: b64Of(u), mime: file.type || 'application/octet-stream', name: file.name }; });
+  }
+  toast('上傳中…');
+  return p.then(function (x) {
+    return api('uploadFile', S.code, { roomId: meta.roomId, puzzleId: meta.puzzleId || '', label: meta.label || '', name: x.name, mime: x.mime }, x.b64, false);
+  });
+}
+
+/** HTML 檔：找出引用的外部檔案，請使用者一起選取後嵌入成單一檔案 */
+function externalRefs(html) {
+  var refs = {}, m;
+  var re1 = /(?:src|href)\s*=\s*["']([^"'#]+)["']/gi, re2 = /url\(\s*["']?([^"')]+)["']?\s*\)/gi;
+  var skip = /^(https?:|data:|blob:|mailto:|javascript:|\/\/|#|tel:)/i;
+  while ((m = re1.exec(html))) if (!skip.test(m[1].trim())) refs[m[1].trim()] = 1;
+  while ((m = re2.exec(html))) if (!skip.test(m[1].trim())) refs[m[1].trim()] = 1;
+  return Object.keys(refs);
+}
+function prepareHtml(file) {
+  return readAsText(file).then(function (html) {
+    var refs = externalRefs(html);
+    if (!refs.length) return html;
+    return new Promise(function (res) {
+      var d = modal('<h3>這個 HTML 還需要其他檔案</h3><p class="help">檔案裡引用了下面這些檔案。請把它們一起選進來，系統會把它們嵌進 HTML，變成單一檔案。</p><ul>' +
+        refs.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') +
+        '</ul><input type="file" id="refFiles" multiple><div class="btns"><button class="btn" id="refOk">嵌入並上傳</button><button class="btn ghost" id="refSkip">略過，直接上傳</button></div>', function () { res(null); });
+      d.querySelector('#refSkip').onclick = function () { S.onModalClose = null; closeModal(); res(html); };
+      d.querySelector('#refOk').onclick = function () {
+        var files = Array.prototype.slice.call(d.querySelector('#refFiles').files || []);
+        Promise.all(files.map(function (f) { return readAsDataURL(f).then(function (u) { return { name: f.name, url: u }; }); })).then(function (list) {
+          var out = html, missing = [];
+          refs.forEach(function (r) {
+            var base = r.split('/').pop().split('?')[0];
+            var hit = list.filter(function (x) { return x.name === base; })[0];
+            if (hit) out = out.split(r).join(hit.url); else missing.push(r);
+          });
+          S.onModalClose = null; closeModal();
+          if (missing.length) toast('還缺：' + missing.join('、') + '，這些部分可能無法顯示', 'err');
+          res(out);
+        });
+      };
+    });
+  });
+}
+
+/* ============================================================
+   啟動與登入
+   ============================================================ */
+function boot() {
+  var go = function (params) {
+    params = params || {};
+    if (params.p) return showPlayEntry(String(params.p).toUpperCase());
+    var c = params.c || store('erCode');
+    if (c) return doLogin(c, true);
+    showLogin();
+  };
+  try { google.script.url.getLocation(function (loc) { go(loc.parameter); }); } catch (e) { go({}); }
+}
+function showLogin(msg) {
+  clearTimers();
+  document.body.className = '';
+  S.view = 'login';
+  app.innerHTML = '<div class="login"><h1>密室工坊</h1><p class="muted">上傳謎題、檢核、遊玩，都在這裡。</p>' +
+    '<div class="card"><h3>製作密室</h3><p class="help">輸入老師發的代碼（分組代碼、老師代碼或管理者代碼）。</p>' +
+    '<input type="text" id="code" placeholder="例如 GAB12C" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
+    '<div class="btns"><button class="btn" data-act="login">進入</button></div>' + (msg ? '<p style="color:var(--err)">' + esc(msg) + '</p>' : '') + '</div>' +
+    '<div class="card"><h3>我是玩家</h3><p class="help">輸入遊戲代碼開始玩。</p>' +
+    '<input type="text" id="pcode" placeholder="例如 P7KQ2" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
+    '<div class="btns"><button class="btn ghost" data-act="toPlay">開始</button></div></div></div>';
+}
+function doLogin(code, silent) {
+  app.innerHTML = '<div class="login"><p class="muted">載入中…</p></div>';
+  return api('login', code).then(function (me) {
+    S.me = me; S.code = me.code;
+    store('erCode', me.code);
+    if (me.role === 'admin') return showAdmin('overview');
+    if (me.role === 'teacher') return showTeacherHome();
+    return showGroupHome();
+  }).catch(function (e) {
+    store('erCode', null);
+    showLogin(silent ? '' : e.message);
+  });
+}
+
+/* ============================================================
+   分組首頁（也供管理者編輯任一密室）
+   ============================================================ */
+function showGroupHome() {
+  clearTimers();
+  document.body.className = '';
+  S.view = 'ws';
+  app.innerHTML = topbar('密室工坊') + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  return api('getWorkspace', S.code).then(function (ws) {
+    ws.mode = 'group';
+    S.ws = ws;
+    renderWorkspace();
+  }).catch(fail);
+}
+function adminOpenWorkspace(roomId) {
+  clearTimers();
+  S.view = 'ws';
+  app.innerHTML = topbar('密室工坊', { back: 'toAdmin' }) + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  return api('adminGetRoom', S.code, roomId).then(function (d) {
+    S.ws = { room: d.room, puzzles: d.puzzles, roomChecks: d.roomChecks, editable: true, mode: 'admin', members: d.members };
+    renderWorkspace();
+  }).catch(fail);
+}
+function wsMembers() { return S.ws.mode === 'admin' ? (S.ws.members || []) : (S.me.members || []); }
+function renderWorkspace() {
+  var ws = S.ws, room = ws.room, admin = ws.mode === 'admin';
+  var members = wsMembers();
+  var counts = {};
+  members.forEach(function (m) { counts[m] = 0; });
+  ws.puzzles.forEach(function (p) { if (counts[p.author] !== undefined) counts[p.author]++; });
+  var locked = !ws.editable;
+  var rs = summarize(ws.roomChecks);
+  var h = topbar(admin ? '編輯：' + (room.groupName || room.title) : (room.groupName || '我的密室'), { back: admin ? 'toAdmin' : '' }) + '<div class="wrap">';
+  if (locked && !admin) h += '<div class="banner">' + (room.status === 'approved' ? '老師已審核通過。' : '已送審，正在等老師審核。') + '內容已鎖定，要修改請找老師開放。</div>';
+  if (admin) h += '<div class="banner">你正在以管理者身分編輯這個密室，修改會直接生效。</div>';
+  h += '<div class="card"><div class="row" style="align-items:center"><div><h3 style="margin:0">' + esc(room.title || '（未命名密室）') + '</h3><div class="muted">' + statusChip(room.status) +
+    (room.published ? ' <span class="chip pub">已發布 ' + esc(room.playCode) + '</span>' : '') + ' · ' + ws.puzzles.length + ' 題 · 預估 ' +
+    ws.puzzles.reduce(function (t, p) { return t + (Number(p.estMinutes) || 0); }, 0) + ' 分鐘</div></div>' +
+    '<div style="flex:none"><button class="btn ghost" data-act="editRoom">密室資訊（封面、說明、結局、心智圖）</button></div></div>';
+  if (members.length) h += '<p class="help" style="margin:10px 0 0">組員：' + members.map(function (m) { return esc(m) + '（' + counts[m] + ' 題）'; }).join('、') + '</p>';
+  h += '</div>';
+
+  h += '<div class="card"><h3>謎題</h3>';
+  if (!ws.puzzles.length) h += '<p class="help">還沒有題目。每位組員按「新增一題」開始做自己的題目。</p>';
+  h += '<div class="list">' + ws.puzzles.map(function (p, i) {
+    return '<div class="item click" data-act="openPuzzle" data-id="' + esc(p.id) + '"><div class="big" style="font-size:22px;width:34px;color:var(--acc)">' + (i + 1) + '</div><div class="main"><div class="t">' +
+      esc(p.title || '（未命名）') + '</div><div class="m">' + esc(p.author || '未選負責人') + ' · ' + kindLabel(p.kind) + ' · ' + (p.estMinutes ? p.estMinutes + ' 分鐘' : '未填時間') + '</div></div>' +
+      sumDots(summarize(p.checks)) +
+      (!locked && !admin ? '<span class="noprint" style="display:flex;gap:4px"><button class="iconbtn" data-act="movePuzzle" data-id="' + esc(p.id) + '" data-dir="-1" aria-label="上移">↑</button><button class="iconbtn" data-act="movePuzzle" data-id="' + esc(p.id) + '" data-dir="1" aria-label="下移">↓</button></span>' : '') + '</div>';
+  }).join('') + '</div>';
+  if (!locked && !admin) h += '<div class="btns"><button class="btn" data-act="newPuzzle">＋ 新增一題</button></div>';
+  h += '</div>';
+
+  h += '<div class="card"><h3>檢核表 ' + sumDots(rs) + '</h3>' + checksHtml(ws.roomChecks) + '</div>';
+  h += '<div class="btns noprint"><button class="btn ghost" data-act="testPlay">▶ 試玩整間</button>';
+  if (!admin && room.status === 'draft') h += '<button class="btn" data-act="submitRoom"' + (rs.err ? ' disabled' : '') + '>送審</button>' + (rs.err ? '<span class="muted" style="align-self:center">紅燈都處理完才能送審</span>' : '');
+  h += '</div></div>';
+  app.innerHTML = h;
+}
+
+/* ============================================================
+   老師首頁（題庫）
+   ============================================================ */
+function showTeacherHome() {
+  clearTimers();
+  document.body.className = '';
+  S.view = 'teacher';
+  app.innerHTML = topbar('密室工坊｜老師題庫') + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  return api('getWorkspace', S.code).then(function (ws) {
+    S.ws = ws; ws.mode = 'teacher';
+    var mine = ws.puzzles.filter(function (p) { return p.editable; });
+    var others = ws.puzzles.filter(function (p) { return !p.editable; });
+    var row = function (p) {
+      return '<div class="item click" data-act="openPuzzle" data-id="' + esc(p.id) + '"><div class="main"><div class="t">' + esc(p.title || '（未命名）') +
+        '</div><div class="m">' + esc(p.author) + ' · ' + kindLabel(p.kind) + ' · ' + (p.estMinutes ? p.estMinutes + ' 分鐘' : '未填時間') + '</div></div>' + sumDots(summarize(p.checks)) + '</div>';
+    };
+    app.innerHTML = topbar('密室工坊｜老師題庫') + '<div class="wrap">' +
+      '<div class="card"><h3>我的題目</h3><p class="help">題目會進入共用題庫，由管理者組裝成示範密室。發布後再修改，不會影響正在玩的版本。</p><div class="list">' +
+      (mine.length ? mine.map(row).join('') : '<p class="muted">還沒有題目。</p>') + '</div><div class="btns"><button class="btn" data-act="newPuzzle">＋ 新增一題</button></div></div>' +
+      '<div class="card"><h3>其他老師的題目（唯讀）</h3><p class="help">出題前先看看，避免撞題。</p><div class="list">' +
+      (others.length ? others.map(row).join('') : '<p class="muted">目前沒有。</p>') + '</div></div></div>';
+  }).catch(fail);
+}
+
+/* ============================================================
+   謎題卡編輯
+   ============================================================ */
+function openPuzzle(id) {
+  var p = (S.ws.puzzles || []).filter(function (x) { return x.id === id; })[0];
+  var editable;
+  if (S.ws.mode === 'admin') editable = true;
+  else if (S.ws.mode === 'teacher') editable = !!p.editable;
+  else editable = S.ws.editable;
+  S.puzzle = clone(p);
+  S.edit = { editable: editable, mode: S.ws.mode };
+  S.target = 'puzzle';
+  S.saver = editable ? makeSaver(function () { return S.puzzle; }, function (d) { return api('savePuzzle', S.code, d); }, function (r) {
+    if (r.conflict) {
+      toast('這題剛被別人改過，已載入最新版本', 'err');
+      S.puzzle = r.puzzle; renderPuzzleEditor(); return;
+    }
+    S.puzzle.rev = r.puzzle.rev;
+    S.puzzle.checks = r.puzzle.checks;
+    if (r.roomChecks) S.ws.roomChecks = r.roomChecks;
+    var pc = document.getElementById('pchecks');
+    if (pc) pc.innerHTML = checksHtml(S.puzzle.checks);
+    var idx = S.ws.puzzles.map(function (x) { return x.id; }).indexOf(S.puzzle.id);
+    if (idx >= 0) S.ws.puzzles[idx] = clone(S.puzzle);
+  }) : null;
+  renderPuzzleEditor();
+}
+function backFromPuzzle() {
+  leaveEditor().then(function () {
+    if (S.ws.returnTo === 'bank') return showAdmin('bank');
+    if (S.ws.mode === 'teacher') return showTeacherHome();
+    if (S.ws.mode === 'admin') return adminOpenWorkspace(S.ws.room.id);
+    return showGroupHome();
+  });
+}
+var BLOCK_TYPES = { text: '文字', image: '圖片', audio: '音檔', html: 'HTML 小遊戲', link: '連結' };
+function renderPuzzleEditor() {
+  var p = S.puzzle, ro = !S.edit.editable, dis = ro ? ' disabled' : '';
+  var st = S.me.settings;
+  var isTeacherPuzzle = p.roomId === 'BANK';
+  var members = S.edit.mode === 'admin' ? (S.ws.members || []) : (S.me.members || []);
+  S.view = 'puzzle';
+  var no = (S.ws.puzzles || []).map(function (x) { return x.id; }).indexOf(p.id) + 1;
+  var h = topbar((no && !isTeacherPuzzle ? '第 ' + no + ' 題' : '謎題卡') + (ro ? '（唯讀）' : ''), { back: 'backPuzzle', status: !ro }) + '<div class="wrap">';
+  h += '<div class="card"><h3>檢核</h3><div id="pchecks">' + checksHtml(p.checks) + '</div></div>';
+
+  // 1 基本
+  h += '<div class="card"><h3><span class="no">1</span>基本資料</h3><label class="f">題目名稱</label><input type="text" data-f="title" value="' + esc(p.title) + '"' + dis + '>';
+  h += '<div class="row"><div><label class="f">負責' + (isTeacherPuzzle ? '老師' : '成員') + '</label>';
+  if (isTeacherPuzzle) h += '<input type="text" value="' + esc(p.author) + '" disabled>';
+  else h += '<select data-f="author"' + dis + '><option value="">請選擇</option>' + members.map(function (m) { return '<option' + (m === p.author ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select>';
+  h += '</div><div><label class="f">類型</label><div class="seg">' + ['digital', 'physical'].map(function (k) {
+    return '<button type="button" data-act="setKind" data-k="' + k + '" class="' + (p.kind === k ? 'on' : '') + '"' + dis + '>' + kindLabel(k) + '</button>';
+  }).join('') + '</div></div><div><label class="f">預估解題時間（分鐘）</label><input type="number" min="1" max="60" data-f="estMinutes" data-num="1" value="' + esc(p.estMinutes) + '"' + dis + '></div></div></div>';
+
+  // 2 步驟鏈
+  h += '<div class="card"><h3><span class="no">2</span>解題步驟鏈</h3><p class="help">把這題拆成步驟：玩家<b>拿到什麼</b> → 要<b>做什麼</b> → <b>得到什麼</b>。例：拿到密文卷軸 → 用對應表換字 → 得到一串明文。<br>中途答案可以不填；填了，玩家完成這一步就要先輸入一次。</p>';
+  h += '<div class="step-h"><span></span><span>拿到什麼</span><span>做什麼</span><span>得到什麼</span><span>中途答案（選填）</span><span></span></div>';
+  (p.steps || []).forEach(function (s, i) {
+    h += '<div class="step"><span class="n">' + (i + 1) + '</span>' +
+      '<textarea style="min-height:60px" data-f="steps.' + i + '.get" placeholder="拿到什麼"' + dis + '>' + esc(s.get) + '</textarea>' +
+      '<textarea style="min-height:60px" data-f="steps.' + i + '.act" placeholder="做什麼"' + dis + '>' + esc(s.act) + '</textarea>' +
+      '<textarea style="min-height:60px" data-f="steps.' + i + '.result" placeholder="得到什麼"' + dis + '>' + esc(s.result) + '</textarea>' +
+      '<input type="text" data-f="steps.' + i + '.checkpoint" placeholder="選填" value="' + esc(s.checkpoint) + '"' + dis + '>' +
+      (ro ? '<span></span>' : '<button class="iconbtn" data-act="delRow" data-arr="steps" data-i="' + i + '" aria-label="刪除這一步">✕</button>') + '</div>';
+  });
+  if (!ro) h += '<button class="btn ghost sm" data-act="addRow" data-arr="steps">＋ 新增一步</button>';
+  h += '</div>';
+
+  // 3 內容
+  h += '<div class="card"><h3><span class="no">3</span>題目內容（玩家會看到的）</h3><p class="help">可以疊很多區塊：文字、Canva 匯出的圖片、GarageBand 音檔、HTML 小遊戲、外部連結（trinket、MakeCode）。純實體關卡寫一段文字告訴玩家去找什麼就好。</p>';
+  (p.blocks || []).forEach(function (b, i) { h += blockEditorHtml(b, i, ro); });
+  if (!ro) h += '<div class="btns">' + Object.keys(BLOCK_TYPES).map(function (t) { return '<button class="btn ghost sm" data-act="addBlock" data-t="' + t + '">＋ ' + BLOCK_TYPES[t] + '</button>'; }).join('') + '</div>';
+  h += '</div>';
+
+  // 4 答案
+  h += '<div class="card"><h3><span class="no">4</span>答案</h3><p class="help">可接受多種寫法時用 / 分開，例如：台灣/臺灣。大小寫、全形半形、空格和標點都不影響判斷。' + (st.answerMaxLen ? '建議 ' + st.answerMaxLen + ' 個字以內。' : '') + '</p>' +
+    '<input type="text" data-f="answer" value="' + esc(p.answer) + '"' + dis + '></div>';
+
+  // 5 提示
+  h += '<div class="card"><h3><span class="no">5</span>提示</h3><p class="help">第一層只提醒方向，第二層再具體一點，不要直接給答案。秒數是「這題開始後多久才能看」。</p>';
+  (p.hints || []).forEach(function (x, i) {
+    h += '<div class="row" style="margin-bottom:8px"><div style="flex:4"><label class="f">第 ' + (i + 1) + ' 層提示</label><textarea style="min-height:60px" data-f="hints.' + i + '.text"' + dis + '>' + esc(x.text) + '</textarea></div>' +
+      '<div style="flex:1;min-width:110px"><label class="f">開始後幾秒可看</label><input type="number" min="0" data-num="1" data-f="hints.' + i + '.delaySec" value="' + esc(x.delaySec) + '"' + dis + '></div>' +
+      (ro ? '' : '<div style="flex:none;min-width:0"><button class="iconbtn" data-act="delRow" data-arr="hints" data-i="' + i + '" aria-label="刪除提示">✕</button></div>') + '</div>';
+  });
+  if (!ro) h += '<button class="btn ghost sm" data-act="addRow" data-arr="hints">＋ 新增一層提示</button>';
+  h += '</div>';
+
+  // 6 道具
+  h += '<div class="card"><h3><span class="no">6</span>道具與佈置</h3><p class="help">老師會把它整理成各組的材料清單。</p>';
+  (p.props || []).forEach(function (x, i) {
+    h += '<div class="row" style="margin-bottom:8px"><div><label class="f">道具</label><input type="text" data-f="props.' + i + '.item" value="' + esc(x.item) + '"' + dis + '></div>' +
+      '<div><label class="f">擺放位置</label><input type="text" data-f="props.' + i + '.place" value="' + esc(x.place) + '"' + dis + '></div>' +
+      (ro ? '' : '<div style="flex:none;min-width:0"><button class="iconbtn" data-act="delRow" data-arr="props" data-i="' + i + '" aria-label="刪除道具">✕</button></div>') + '</div>';
+  });
+  if (!ro) h += '<button class="btn ghost sm" data-act="addRow" data-arr="props">＋ 新增道具</button>';
+  h += '</div>';
+
+  // 7 主題
+  h += '<div class="card"><h3><span class="no">7</span>' + esc(isTeacherPuzzle ? '主題連結與檢核' : st.themeLabel) + '</h3>' +
+    '<label class="f">這題和主題的關係（一兩句話）</label><textarea data-f="themeLink"' + dis + '>' + esc(p.themeLink) + '</textarea>';
+  if (isTeacherPuzzle) {
+    h += '<label class="f">科學依據（資料來源或原理）</label><textarea data-f="scienceBasis"' + dis + '>' + esc(p.scienceBasis) + '</textarea>' +
+      '<label class="f">換皮檢核：拿掉主題後，這題還成立嗎？主題在解題過程中扮演什麼角色？</label><textarea data-f="reskinCheck"' + dis + '>' + esc(p.reskinCheck) + '</textarea>';
+  }
+  h += '</div>';
+
+  h += '<div class="btns noprint"><button class="btn ghost" data-act="previewPuzzle">👁 用玩家角度看</button>' +
+    (!ro && S.edit.mode !== 'admin' ? '<button class="btn danger" data-act="deletePuzzle">刪除這題</button>' : '') + '</div></div>';
+  app.innerHTML = h;
+  hydrateFiles();
+}
+function blockEditorHtml(b, i, ro) {
+  var dis = ro ? ' disabled' : '';
+  var n = (S.puzzle.blocks || []).length;
+  var h = '<div class="sub"><div class="hd">' + (i + 1) + '. ' + BLOCK_TYPES[b.type] + '<span class="sp"></span>' +
+    (ro ? '' : '<button class="iconbtn" data-act="moveBlock" data-i="' + i + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="上移">↑</button><button class="iconbtn" data-act="moveBlock" data-i="' + i + '" data-dir="1"' + (i === n - 1 ? ' disabled' : '') + ' aria-label="下移">↓</button><button class="iconbtn" data-act="delRow" data-arr="blocks" data-i="' + i + '" aria-label="刪除區塊">✕</button>') + '</div>';
+  if (b.type === 'text') h += '<textarea data-f="blocks.' + i + '.text"' + dis + '>' + esc(b.text) + '</textarea>';
+  if (b.type === 'image') {
+    if (b.fileId) h += '<img class="thumb" data-file="' + esc(b.fileId) + '" alt="圖片">';
+    if (!ro) h += '<input type="file" accept="image/*" data-upload="block" data-i="' + i + '">';
+    h += '<label class="f">圖說（選填）</label><input type="text" data-f="blocks.' + i + '.caption" value="' + esc(b.caption) + '"' + dis + '>';
+  }
+  if (b.type === 'audio') {
+    if (b.fileId) h += '<audio controls data-file="' + esc(b.fileId) + '" style="width:100%"></audio>';
+    if (!ro) h += '<input type="file" accept="audio/*,.m4a,.mp3,.wav" data-upload="block" data-i="' + i + '">';
+    h += '<label class="f">說明（選填）</label><input type="text" data-f="blocks.' + i + '.caption" value="' + esc(b.caption) + '"' + dis + '>';
+  }
+  if (b.type === 'html') {
+    h += '<p class="help">上傳一個 .html 檔。小遊戲破關後請「顯示密碼」，玩家再到下面的答案欄輸入；不要在 HTML 裡檢查答案。</p>';
+    if (b.fileId) h += '<p>已上傳：' + esc(b.fileName || 'HTML 檔') + ' <button class="btn ghost sm" data-act="previewHtml" data-i="' + i + '">預覽</button></p>';
+    if (!ro) h += '<input type="file" accept=".html,.htm,text/html" data-upload="html" data-i="' + i + '">';
+    h += '<label class="f">顯示高度（像素）</label><input type="number" min="200" max="1400" data-num="1" data-f="blocks.' + i + '.height" value="' + esc(b.height || 520) + '"' + dis + '>';
+  }
+  if (b.type === 'link') {
+    h += '<div class="row"><div><label class="f">網址</label><input type="url" data-f="blocks.' + i + '.url" value="' + esc(b.url) + '" placeholder="https://"' + dis + '></div>' +
+      '<div><label class="f">按鈕文字</label><input type="text" data-f="blocks.' + i + '.label" value="' + esc(b.label) + '"' + dis + '></div></div>';
+  }
+  return h + '</div>';
+}
+
+/* 玩家角度預覽（只在本機判斷答案，不會記錄） */
+function previewPuzzle(p) {
+  var gates = [];
+  (p.steps || []).forEach(function (s) { if (String(s.checkpoint || '').trim()) gates.push({ label: s.result || '中途答案', answers: splitAns(s.checkpoint) }); });
+  gates.push({ label: '答案', answers: splitAns(p.answer) });
+  var g = 0;
+  var d = modal('<div style="background:#12161b;color:#eef0f2;border-radius:12px;padding:6px 14px 14px;margin-top:22px"><div class="pcard" style="margin-top:12px"><h2>' + esc(p.title) + '</h2><div id="pvBlocks"></div></div>' +
+    '<div class="pcard"><div class="gate" id="pvGate"></div><input class="pin" id="pvIn" autocomplete="off"><button class="pbtn" id="pvGo">送出</button><div class="pmsg" id="pvMsg"></div>' +
+    (p.hints || []).filter(function (x) { return String(x.text || '').trim(); }).map(function (x, i) { return '<div class="phint">提示 ' + (i + 1) + '（開始後 ' + (x.delaySec || 0) + ' 秒）：' + esc(x.text) + '</div>'; }).join('') + '</div></div>');
+  var setGate = function () { d.querySelector('#pvGate').textContent = gates.length > 1 ? '第 ' + (g + 1) + ' / ' + gates.length + ' 步：' + gates[g].label : '答案'; };
+  setGate();
+  renderPlayBlocks(d.querySelector('#pvBlocks'), (p.blocks || []).map(function (b) { return b; }), true);
+  d.querySelector('#pvGo').onclick = function () {
+    var v = d.querySelector('#pvIn').value, m = d.querySelector('#pvMsg');
+    if (norm(v) && gates[g].answers.some(function (a) { return norm(a) === norm(v); })) {
+      if (g < gates.length - 1) { g++; setGate(); m.className = 'pmsg good'; m.textContent = '正確！繼續下一步'; d.querySelector('#pvIn').value = ''; }
+      else { m.className = 'pmsg good'; m.textContent = '答對了！這題完成'; }
+    } else { m.className = 'pmsg bad'; m.textContent = '答案不對'; }
+  };
+}
+
+/* ============================================================
+   密室資訊編輯
+   ============================================================ */
+function openRoomEditor() {
+  var ws = S.ws;
+  var go = function (room) {
+    S.room = room;
+    S.target = 'room';
+    var editable = ws.mode === 'admin' || room.editable;
+    S.edit = { editable: editable, mode: ws.mode };
+    S.saver = editable ? makeSaver(function () { return S.room; }, function (d) { return api('saveRoom', S.code, d); }, function (r) {
+      if (r.conflict) { toast('剛被別人改過，已載入最新版本', 'err'); S.room = r.room; renderRoomEditor(); return; }
+      S.room.rev = r.room.rev;
+      ws.room = clone(S.room);
+      ws.roomChecks = r.roomChecks;
+    }) : null;
+    renderRoomEditor();
+  };
+  api('getRoom', S.code, ws.room.id).then(go).catch(fail);
+}
+function mediaPageHtml(path, pg, label, ro) {
+  pg = pg || {};
+  var dis = ro ? ' disabled' : '';
+  var h = '<div class="sub"><div class="hd">' + esc(label) + '</div><label class="f">文字</label><textarea data-f="' + path + '.text"' + dis + '>' + esc(pg.text) + '</textarea><label class="f">圖片（選填）</label>';
+  if (pg.imageId) h += '<img class="thumb" data-file="' + esc(pg.imageId) + '" alt="' + esc(label) + '">' + (ro ? '' : '<button class="iconbtn" data-act="clearImg" data-path="' + path + '.imageId">移除圖片</button>');
+  if (!ro) h += '<input type="file" accept="image/*" data-upload="roomimg" data-path="' + path + '.imageId" data-label="' + esc(label) + '">';
+  return h + '</div>';
+}
+function renderRoomEditor() {
+  var r = S.room, ro = !S.edit.editable, dis = ro ? ' disabled' : '', admin = S.edit.mode === 'admin';
+  S.view = 'room';
+  var h = topbar('密室資訊' + (ro ? '（唯讀）' : ''), { back: 'backRoom', status: !ro }) + '<div class="wrap">';
+  h += '<div class="card"><h3>密室名稱</h3><input type="text" data-f="title" value="' + esc(r.title) + '"' + dis + '>';
+  if (admin) h += '<div class="row"><div><label class="f">遊玩時間（分鐘）</label><input type="number" data-num="1" data-f="timeLimitMin" value="' + esc(r.timeLimitMin) + '"></div><div><label class="f">教室／地點</label><input type="text" data-f="location" value="' + esc(r.location) + '"></div></div>';
+  h += '</div>';
+  h += '<div class="card"><h3>封面</h3>' + mediaPageHtml('cover', r.cover, '封面', ro) + '</div>';
+  h += '<div class="card"><h3>說明頁（1～3 頁，講故事、交代任務）</h3>';
+  (r.story || []).forEach(function (pg, i) {
+    h += mediaPageHtml('story.' + i, pg, '說明頁 ' + (i + 1), ro);
+    if (!ro && r.story.length > 1) h += '<button class="iconbtn" data-act="delStory" data-i="' + i + '">刪除說明頁 ' + (i + 1) + '</button>';
+  });
+  if (!ro && (r.story || []).length < 3) h += '<div class="btns"><button class="btn ghost sm" data-act="addStory">＋ 新增說明頁</button></div>';
+  h += '</div>';
+  h += '<div class="card"><h3>結局</h3>' + mediaPageHtml('success', r.success, '成功頁（逃脫成功）', ro) + mediaPageHtml('fail', r.fail, '失敗頁（時間到）', ro) + '</div>';
+  if (r.kind === 'group') {
+    h += '<div class="card"><h3>密室結構心智圖</h3><p class="help">上傳 GitMind 匯出的圖片，或貼上分享連結。</p>';
+    if (r.mindmap && r.mindmap.fileId) h += '<img class="thumb" data-file="' + esc(r.mindmap.fileId) + '" alt="心智圖">';
+    if (!ro) h += '<input type="file" accept="image/*,application/pdf" data-upload="mindmap">';
+    h += '<label class="f">或貼上連結</label><input type="url" data-f="mindmap.url" value="' + esc(r.mindmap && r.mindmap.url) + '" placeholder="https://"' + dis + '></div>';
+  }
+  app.innerHTML = h + '</div>';
+  hydrateFiles();
+}
+function backFromRoom() {
+  leaveEditor().then(function () {
+    if (S.ws.returnTo === 'bank') return showAdmin('bank');
+    if (S.ws.mode === 'admin') return adminOpenWorkspace(S.room.id);
+    return showGroupHome();
+  });
+}
+
+/* ============================================================
+   管理者
+   ============================================================ */
+function showAdmin(tab) {
+  clearTimers();
+  document.body.className = '';
+  S.view = 'admin';
+  S.admin.tab = tab || S.admin.tab || 'overview';
+  app.innerHTML = topbar('密室工坊｜管理') + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  return api('adminOverview', S.code).then(function (d) {
+    S.admin.data = d;
+    S.me.settings = d.settings;
+    renderAdmin();
+  }).catch(fail);
+}
+var ADMIN_TABS = { overview: '總覽與審核', bank: '示範密室與題庫', codes: '代碼', live: '進行中', settings: '設定' };
+function renderAdmin() {
+  clearTimers();
+  var d = S.admin.data, tab = S.admin.tab;
+  var h = topbar('密室工坊｜管理') + '<div class="wrap"><div class="tabs noprint">' + Object.keys(ADMIN_TABS).map(function (k) {
+    return '<button class="' + (k === tab ? 'on' : '') + '" data-act="adminTab" data-tab="' + k + '">' + ADMIN_TABS[k] + '</button>';
+  }).join('') + '</div><div id="adminBody"></div></div>';
+  app.innerHTML = h;
+  var body = document.getElementById('adminBody');
+  if (tab === 'overview') body.innerHTML = adminOverviewHtml(d);
+  if (tab === 'bank') body.innerHTML = adminBankHtml(d);
+  if (tab === 'codes') body.innerHTML = adminCodesHtml(d);
+  if (tab === 'settings') body.innerHTML = adminSettingsHtml(d.settings);
+  if (tab === 'live') { body.innerHTML = '<p class="muted">載入中…</p>'; loadLive(); S.timers.push(setInterval(loadLive, 10000)); }
+}
+function roomCardHtml(r) {
+  var h = '<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><div class="t" style="font-weight:700;font-size:17px">' + esc(r.kind === 'teacher' ? '示範：' + r.title : (r.groupName || '')) + '</div>' +
+    '<div class="muted" style="font-size:14px">' + (r.kind === 'group' ? esc(r.title) : '老師示範密室') + '</div></div>' + statusChip(r.status) + '</div>';
+  h += '<p style="margin:8px 0;font-size:14px">' + sumDots(r.summary) + ' · ' + r.puzzleCount + ' 題 · 預估 ' + r.estTotal + ' / ' + (r.timeLimitMin || '') + ' 分鐘' +
+    (r.unlocksUsed ? ' · 已開放修改 ' + r.unlocksUsed + ' 次' : '') + (r.location ? ' · ' + esc(r.location) : '') + '</p>';
+  if (r.published) h += '<p style="margin:0 0 8px"><span class="chip pub">已發布｜遊戲代碼 ' + esc(r.playCode) + '</span></p>';
+  h += '<div class="btns">';
+  h += '<button class="btn sm" data-act="adminView" data-id="' + r.id + '">檢視</button>';
+  h += '<button class="btn ghost sm" data-act="adminEdit" data-id="' + r.id + '">編輯</button>';
+  if (r.kind === 'group' && r.status === 'submitted') h += '<button class="btn sm" data-act="roomAction" data-a="approve" data-id="' + r.id + '">審核通過</button>';
+  if (r.kind === 'group' && r.status !== 'draft') h += '<button class="btn ghost sm" data-act="roomAction" data-a="unlock" data-id="' + r.id + '">開放修改</button>';
+  if (r.kind === 'teacher' || r.status === 'approved') h += '<button class="btn ghost sm" data-act="roomAction" data-a="publish" data-id="' + r.id + '">' + (r.published ? '更新發布版本' : '發布') + '</button>';
+  if (r.published) h += '<button class="btn ghost sm" data-act="playQr" data-id="' + r.id + '">遊玩 QR</button><button class="btn ghost sm" data-act="roomAction" data-a="unpublish" data-id="' + r.id + '">下架</button>';
+  h += '<button class="btn ghost sm" data-act="adminTest" data-id="' + r.id + '">試玩</button>';
+  h += '<button class="btn ghost sm" data-act="adminStats" data-id="' + r.id + '">數據</button>';
+  h += '<button class="btn ghost sm" data-act="adminExport" data-id="' + r.id + '">匯出</button>';
+  return h + '</div></div>';
+}
+function adminOverviewHtml(d) {
+  var groups = d.rooms.filter(function (r) { return r.kind === 'group'; });
+  var trooms = d.rooms.filter(function (r) { return r.kind === 'teacher'; });
+  var n = function (st) { return groups.filter(function (r) { return r.status === st; }).length; };
+  var h = '<div class="card"><div class="row" style="align-items:center"><div><b>' + esc(d.settings.campName) + '</b><div class="muted" style="font-size:14px">' + groups.length + ' 組：製作中 ' + n('draft') + '、已送審 ' + n('submitted') + '、審核通過 ' + n('approved') + '</div></div>' +
+    '<div style="flex:none" class="btns"><button class="btn ghost sm" data-act="materials">列印材料清單</button><button class="btn ghost sm" data-act="refreshAdmin">重新整理</button></div></div></div>';
+  if (!groups.length) h += '<div class="banner">還沒有分組。到「代碼」分頁建立各組代碼。</div>';
+  h += '<div class="grid">' + groups.map(roomCardHtml).join('') + '</div>';
+  if (trooms.length) h += '<h3 style="margin:18px 0 10px">示範密室</h3><div class="grid">' + trooms.map(roomCardHtml).join('') + '</div>';
+  return h;
+}
+function adminBankHtml(d) {
+  var trooms = d.rooms.filter(function (r) { return r.kind === 'teacher'; });
+  var h = '<div class="card"><h3>老師題庫（' + d.bank.length + ' 題）</h3>';
+  if (!d.bank.length) h += '<p class="help">還沒有題目。到「代碼」分頁建立老師代碼，請老師用代碼登入出題。</p>';
+  h += '<div class="list">' + d.bank.map(function (p) {
+    return '<div class="item"><div class="main"><div class="t">' + esc(p.title || '（未命名）') + '</div><div class="m">' + esc(p.author) + ' · ' + kindLabel(p.kind) + ' · ' + (p.estMinutes || '?') + ' 分鐘</div></div>' + sumDots(p.summary) +
+      '<button class="btn ghost sm" data-act="bankOpen" data-id="' + p.id + '">開啟</button></div>';
+  }).join('') + '</div></div>';
+  h += '<div class="card"><h3>示範密室</h3><p class="help">從題庫挑題目、排順序，組成一間密室。發布時會凍結當下的版本，之後老師再改題目也不會影響正在玩的人。</p>';
+  trooms.forEach(function (r) {
+    h += '<div class="sub"><div class="hd">' + esc(r.title) + '<span class="sp"></span>' + statusChip(r.status) + (r.published ? ' <span class="chip pub">' + esc(r.playCode) + '</span>' : '') + '</div>' +
+      '<p style="margin:0 0 6px;font-size:14px">' + sumDots(r.summary) + ' · ' + r.puzzleCount + ' 題 · 預估 ' + r.estTotal + ' / ' + r.timeLimitMin + ' 分鐘</p>' +
+      '<div class="btns"><button class="btn sm" data-act="assemble" data-id="' + r.id + '">挑題與排序</button><button class="btn ghost sm" data-act="trEdit" data-id="' + r.id + '">封面、說明、結局</button>' +
+      '<button class="btn ghost sm" data-act="adminView" data-id="' + r.id + '">檢視</button></div></div>';
+  });
+  h += '<div class="row"><div><label class="f">新的示範密室名稱</label><input type="text" id="trName" placeholder="例如：氣候變遷密室"></div><div style="flex:none"><button class="btn" data-act="createTR">建立</button></div></div></div>';
+  return h;
+}
+function adminCodesHtml(d) {
+  var url = d.appUrl || '';
+  var groups = d.codes.filter(function (c) { return c.role === 'group'; });
+  var teachers = d.codes.filter(function (c) { return c.role === 'teacher'; });
+  var h = '<div class="card"><h3>分組（' + groups.length + ' 組）</h3><table><tr><th>組別</th><th>組員（用逗號或頓號分開）</th><th>代碼</th><th></th></tr>' +
+    groups.map(function (c) {
+      return '<tr><td><input type="text" data-codename="' + c.code + '" value="' + esc(c.name) + '"></td><td><input type="text" data-codemem="' + c.code + '" value="' + esc(String(c.members || '').split(',').join('、')) + '"></td>' +
+        '<td class="big" style="font-size:18px">' + esc(c.code) + '</td><td><button class="btn ghost sm" data-act="saveCode" data-code="' + c.code + '">儲存</button></td></tr>';
+    }).join('') + '</table>';
+  h += '<label class="f">一次新增多組（一行一組，格式：組名：組員、組員、組員）</label><textarea id="newGroups" placeholder="第一組：王小明、李小華、陳大同、林美美&#10;第二組：……"></textarea><div class="btns"><button class="btn" data-act="createGroups">建立分組代碼</button></div></div>';
+  h += '<div class="card"><h3>老師（' + teachers.length + ' 位）</h3><table><tr><th>姓名</th><th>代碼</th><th></th></tr>' + teachers.map(function (c) {
+    return '<tr><td><input type="text" data-codename="' + c.code + '" value="' + esc(c.name) + '"></td><td class="big" style="font-size:18px">' + esc(c.code) + '</td><td><button class="btn ghost sm" data-act="saveCode" data-code="' + c.code + '">儲存</button></td></tr>';
+  }).join('') + '</table><label class="f">新增老師（一行一位）</label><textarea id="newTeachers"></textarea><div class="btns"><button class="btn" data-act="createTeachers">建立老師代碼</button></div></div>';
+  h += '<div class="card"><h3>發給學生與老師</h3><p class="help">印出每個代碼的 QR code，掃描就能直接進入自己的上傳頁。' + (url ? '' : '（部署成網頁應用程式後才會有網址）') + '</p><div class="btns"><button class="btn" data-act="printCodes">列印代碼 QR</button></div></div>';
+  return h;
+}
+var SETTING_FIELDS = [
+  ['campName', '營隊名稱', 'text'], ['themeLabel', '學生謎題卡第 7 區的標題', 'text'],
+  ['playMinutes', '學生密室遊玩時間（分鐘）', 'number'], ['teacherRoomMinutes', '新建示範密室的預設時間（分鐘）', 'number'],
+  ['maxPuzzleMinutes', '每題預估時間上限（分鐘，超過亮黃燈）', 'number'], ['maxHints', '每題提示層數上限', 'number'],
+  ['minPuzzlesPerMember', '每人至少幾題', 'number'], ['maxPuzzlesPerMember', '每人最多幾題', 'number'],
+  ['answerMaxLen', '答案字數上限（0 = 不限）', 'number'], ['wrongCooldownSec', '答錯後等幾秒才能再答', 'number'],
+  ['defaultHintDelaySec', '新增提示時預設幾秒後可看', 'number'], ['requireDigitalAndPhysical', '每組數位題、實體題至少各一題', 'bool']
+];
+function adminSettingsHtml(s) {
+  return '<div class="card"><h3>營隊規則</h3><p class="help">規則超標只會亮黃燈提醒，不會擋住學生。</p>' + SETTING_FIELDS.map(function (f) {
+    if (f[2] === 'bool') return '<label style="display:flex;gap:8px;align-items:center;margin:12px 0"><input type="checkbox" data-set="' + f[0] + '"' + (s[f[0]] ? ' checked' : '') + '>' + esc(f[1]) + '</label>';
+    return '<label class="f">' + esc(f[1]) + '</label><input type="' + f[2] + '" data-set="' + f[0] + '" value="' + esc(s[f[0]]) + '">';
+  }).join('') + '<div class="btns"><button class="btn" data-act="saveSettings">儲存設定</button></div></div>';
+}
+function loadLive() {
+  if (S.view !== 'admin' || S.admin.tab !== 'live') return;
+  api('adminLive', S.code).then(function (rows) {
+    var b = document.getElementById('adminBody');
+    if (!b || S.admin.tab !== 'live') return;
+    b.innerHTML = '<div class="card"><h3>最近三小時的遊戲 <span class="muted" style="font-size:13px">每 10 秒更新</span></h3>' + (rows.length ? '<table><tr><th>隊伍</th><th>密室</th><th>進度</th><th>時間</th><th>提示</th><th>答錯</th><th>狀態</th></tr>' + rows.map(function (r) {
+      return '<tr><td>' + esc(r.team) + (r.test ? ' <span class="chip">試玩</span>' : '') + '</td><td>' + esc(r.room) + '</td><td>' + (r.result ? r.total : r.index + 1) + ' / ' + r.total + '</td><td>' + fmtSec(r.elapsedSec) + '</td><td>' + (r.hints || 0) + '</td><td>' + r.wrong + '</td><td>' +
+        (r.result === 'escaped' ? '<span class="chip approved">逃脫成功</span>' : r.result === 'timeout' ? '<span class="chip submitted">時間到</span>' : '<span class="chip draft">進行中</span>') + '</td></tr>';
+    }).join('') + '</table>' : '<p class="muted">目前沒有遊戲。</p>') + '</div>';
+  }).catch(function () { });
+}
+function adminView(roomId) {
+  app.innerHTML = topbar('檢視密室', { back: 'toAdmin' }) + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  api('adminGetRoom', S.code, roomId).then(function (d) {
+    var r = d.room;
+    var pg = function (label, x) {
+      x = x || {};
+      return '<div class="sub"><div class="hd">' + esc(label) + '</div>' + (x.imageId ? '<img class="thumb" data-file="' + esc(x.imageId) + '">' : '') + '<div class="pre">' + esc(x.text) + '</div></div>';
+    };
+    var h = topbar('檢視：' + (r.groupName || r.title), { back: 'toAdmin' }) + '<div class="wrap">';
+    h += '<div class="card"><h3>' + esc(r.title) + ' ' + statusChip(r.status) + '</h3>' + (d.members.length ? '<p class="muted">組員：' + d.members.map(esc).join('、') + '</p>' : '') +
+      '<h3 style="font-size:16px">檢核（含 HTML 原始碼檢查）</h3>' + checksHtml(d.roomChecks) + '</div>';
+    h += '<div class="card"><h3>封面、說明與結局</h3>' + pg('封面', r.cover) + (r.story || []).map(function (s, i) { return pg('說明頁 ' + (i + 1), s); }).join('') + pg('成功頁', r.success) + pg('失敗頁', r.fail) +
+      (r.mindmap && (r.mindmap.fileId || r.mindmap.url) ? '<div class="sub"><div class="hd">心智圖</div>' + (r.mindmap.fileId ? '<img class="thumb" data-file="' + esc(r.mindmap.fileId) + '">' : '') + (r.mindmap.url ? '<a target="_blank" href="' + esc(r.mindmap.url) + '">' + esc(r.mindmap.url) + '</a>' : '') + '</div>' : '') + '</div>';
+    d.puzzles.forEach(function (p, i) {
+      h += '<div class="card"><h3>第 ' + (i + 1) + ' 題　' + esc(p.title) + '</h3><div class="kv"><span class="muted">負責</span><span>' + esc(p.author) + '</span><span class="muted">類型</span><span>' + kindLabel(p.kind) + '</span><span class="muted">預估</span><span>' + esc(p.estMinutes) + ' 分鐘</span><span class="muted">答案</span><span><b>' + esc(p.answer) + '</b></span></div>' +
+        '<h3 style="font-size:16px;margin-top:12px">解題步驟鏈</h3><ol>' + (p.steps || []).map(function (s) { return '<li>' + esc(s.get) + ' → ' + esc(s.act) + ' → ' + esc(s.result) + (s.checkpoint ? '（中途答案：' + esc(s.checkpoint) + '）' : '') + '</li>'; }).join('') + '</ol>' +
+        '<h3 style="font-size:16px">提示</h3><ol>' + (p.hints || []).map(function (x) { return '<li>' + esc(x.text) + '（' + esc(x.delaySec) + ' 秒）</li>'; }).join('') + '</ol>' +
+        ((p.props || []).length ? '<h3 style="font-size:16px">道具</h3><ul>' + p.props.map(function (x) { return '<li>' + esc(x.item) + (x.place ? '：' + esc(x.place) : '') + '</li>'; }).join('') + '</ul>' : '') +
+        '<div class="kv"><span class="muted">主題連結</span><span class="pre">' + esc(p.themeLink) + '</span>' + (p.scienceBasis ? '<span class="muted">科學依據</span><span class="pre">' + esc(p.scienceBasis) + '</span>' : '') + (p.reskinCheck ? '<span class="muted">換皮檢核</span><span class="pre">' + esc(p.reskinCheck) + '</span>' : '') + '</div>' +
+        '<div class="btns"><button class="btn ghost sm" data-act="previewById" data-id="' + p.id + '">用玩家角度看</button></div>' +
+        '<h3 style="font-size:16px;margin-top:12px">檢核</h3>' + checksHtml(p.checks) + '</div>';
+    });
+    S.viewPuzzles = d.puzzles;
+    app.innerHTML = h + '</div>';
+    hydrateFiles();
+  }).catch(fail);
+}
+function adminStats(roomId) {
+  app.innerHTML = topbar('遊玩數據', { back: 'toAdmin' }) + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  api('adminStats', S.code, roomId).then(function (d) {
+    var h = topbar('數據：' + d.title, { back: 'toAdmin' }) + '<div class="wrap"><div class="card"><h3>' + esc(d.title) + '</h3><p>正式遊玩 ' + d.plays + ' 場，逃脫成功 ' + d.escaped + ' 場（試玩不列入）。</p></div>';
+    h += '<div class="card" style="overflow-x:auto"><h3>每一題</h3><table><tr><th>#</th><th>題目</th><th>負責</th><th>預估</th><th>實際平均</th><th>到達／解開</th><th>看提示</th><th>答錯</th><th>常見錯誤答案</th><th>難易度</th></tr>' + d.perPuzzle.map(function (p) {
+      var slow = p.avgSolveMin !== null && p.estMinutes && p.avgSolveMin > p.estMinutes * 1.3;
+      return '<tr><td>' + p.no + '</td><td>' + esc(p.title) + '</td><td>' + esc(p.author) + '</td><td>' + (p.estMinutes || '') + ' 分</td><td' + (slow ? ' style="color:var(--err);font-weight:700"' : '') + '>' + (p.avgSolveMin === null ? '—' : p.avgSolveMin + ' 分') + '</td><td>' + p.reached + ' / ' + p.solved + '</td><td>' + p.hintsUsed + '</td><td>' + p.wrongCount + '</td><td>' +
+        p.topWrong.map(function (w) { return esc(w.answer) + '×' + w.count; }).join('、') + '</td><td>' + (p.avgRating === null ? '—' : p.avgRating + '（' + p.ratingCount + '）') + '</td></tr>';
+    }).join('') + '</table><p class="help" style="margin-top:8px">紅字：實際時間比預估多 30% 以上。</p></div>';
+    h += '<div class="card"><h3>玩家回饋</h3>' + (d.comments.length ? '<ul>' + d.comments.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : '<p class="muted">還沒有。</p>') + '</div></div>';
+    app.innerHTML = h;
+  }).catch(fail);
+}
+function showAssemble(roomId) {
+  var d = S.admin.data;
+  var room = d.rooms.filter(function (r) { return r.id === roomId; })[0];
+  S.assemble = { roomId: roomId, ids: (room.puzzleIds || []).slice() };
+  renderAssemble();
+}
+function renderAssemble() {
+  var d = S.admin.data, A = S.assemble;
+  var room = d.rooms.filter(function (r) { return r.id === A.roomId; })[0];
+  var byId = {};
+  d.bank.forEach(function (p) { byId[p.id] = p; });
+  var total = A.ids.reduce(function (t, id) { return t + (Number((byId[id] || {}).estMinutes) || 0); }, 0);
+  var h = topbar('挑題與排序：' + room.title, { back: 'toAdminBank' }) + '<div class="wrap"><div class="row" style="align-items:flex-start">';
+  h += '<div class="card" style="flex:1"><h3>題庫</h3><div class="list">' + d.bank.filter(function (p) { return A.ids.indexOf(p.id) < 0; }).map(function (p) {
+    return '<div class="item"><div class="main"><div class="t">' + esc(p.title || '（未命名）') + '</div><div class="m">' + esc(p.author) + ' · ' + (p.estMinutes || '?') + ' 分</div></div>' + sumDots(p.summary) + '<button class="btn ghost sm" data-act="asmAdd" data-id="' + p.id + '">加入 →</button></div>';
+  }).join('') + '</div></div>';
+  h += '<div class="card" style="flex:1"><h3>這間密室（' + A.ids.length + ' 題，預估 ' + total + ' / ' + room.timeLimitMin + ' 分鐘）</h3><div class="list">' + A.ids.map(function (id, i) {
+    var p = byId[id] || { title: '（已刪除）' };
+    return '<div class="item"><b style="width:24px">' + (i + 1) + '</b><div class="main"><div class="t">' + esc(p.title) + '</div><div class="m">' + esc(p.author || '') + '</div></div><button class="iconbtn" data-act="asmMove" data-i="' + i + '" data-dir="-1">↑</button><button class="iconbtn" data-act="asmMove" data-i="' + i + '" data-dir="1">↓</button><button class="iconbtn" data-act="asmDel" data-i="' + i + '">✕</button></div>';
+  }).join('') + '</div><div class="btns"><button class="btn" data-act="asmSave">儲存</button></div></div></div></div>';
+  app.innerHTML = h;
+}
+function printCodes() {
+  var d = S.admin.data, url = d.appUrl || '';
+  var list = d.codes.filter(function (c) { return c.role !== 'admin'; });
+  var h = topbar('列印代碼', { back: 'toAdminCodes' }) + '<div class="wrap"><div class="btns noprint" style="margin-bottom:12px"><button class="btn" data-act="print">列印</button></div><div class="qrsheet">' + list.map(function (c) {
+    return '<div class="cell"><div style="font-weight:700;font-size:18px">' + esc(c.name) + '</div><div class="muted" style="font-size:13px">' + (c.role === 'teacher' ? '老師代碼' : '分組代碼') + '</div><div class="qr" data-qr="' + esc(url ? url + '?c=' + c.code : '') + '"></div><div class="big">' + esc(c.code) + '</div>' +
+      (c.members ? '<div style="font-size:13px">' + esc(String(c.members).split(',').join('、')) + '</div>' : '') + '</div>';
+  }).join('') + '</div></div>';
+  app.innerHTML = h;
+  drawQrs();
+}
+function drawQrs() {
+  app.querySelectorAll('[data-qr]').forEach(function (el) {
+    var t = el.getAttribute('data-qr');
+    if (!t) { el.textContent = '（尚未部署）'; return; }
+    try { new QRCode(el, { text: t, width: 140, height: 140 }); } catch (e) { el.textContent = t; }
+  });
+}
+function showMaterials() {
+  app.innerHTML = topbar('材料清單', { back: 'toAdmin' }) + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  api('adminMaterials', S.code).then(function (rooms) {
+    var h = topbar('材料清單', { back: 'toAdmin' }) + '<div class="wrap"><div class="btns noprint" style="margin-bottom:12px"><button class="btn" data-act="print">列印</button></div>';
+    rooms.forEach(function (r) {
+      h += '<div class="card"><h3>' + esc(r.groupName || r.title) + (r.location ? '　📍' + esc(r.location) : '') + '</h3><p class="muted" style="margin:0 0 8px">' + esc(r.title) + '</p><table><tr><th>#</th><th>題目</th><th>負責</th><th>類型</th><th>道具</th><th>擺放位置</th><th>✓</th></tr>';
+      r.puzzles.forEach(function (p) {
+        var props = p.props.filter(function (x) { return String(x.item || '').trim(); });
+        if (!props.length) props = [{ item: '—', place: '' }];
+        props.forEach(function (x, k) {
+          h += '<tr>' + (k === 0 ? '<td rowspan="' + props.length + '">' + p.no + '</td><td rowspan="' + props.length + '">' + esc(p.title) + '</td><td rowspan="' + props.length + '">' + esc(p.author) + '</td><td rowspan="' + props.length + '">' + kindLabel(p.kind) + '</td>' : '') +
+            '<td>' + esc(x.item) + '</td><td>' + esc(x.place) + '</td><td>☐</td></tr>';
+        });
+      });
+      h += '</table></div>';
+    });
+    app.innerHTML = h + '</div>';
+  }).catch(fail);
+}
+
+/* ============================================================
+   遊玩
+   ============================================================ */
+function showPlayEntry(playCode) {
+  clearTimers();
+  document.body.className = 'playing';
+  S.view = 'playEntry';
+  app.innerHTML = '<div class="play" style="max-width:520px;margin-top:8vh"><div class="pcard"><h2>準備開始</h2><p>遊戲代碼：<b>' + esc(playCode) + '</b></p>' +
+    '<input class="pin" id="team" placeholder="輸入隊名" maxlength="30" autocomplete="off"><button class="pbtn" data-act="playStart" data-code="' + esc(playCode) + '">進入密室</button><div class="pmsg bad" id="pmsg"></div></div>' +
+    '<p class="center"><a href="#" data-act="toLogin" style="color:#9aa4ae">回到首頁</a></p></div>';
+}
+function enterPlay(intro) {
+  S.play = { id: intro.playId, intro: intro, test: intro.test, page: 0, pid: null, blocks: null, deadline: 0, hintAt: 0, coolAt: 0, rate: {} };
+  document.body.className = 'playing';
+  S.view = 'play';
+  showIntroPage();
+}
+function introPages() {
+  var it = S.play.intro, pages = [];
+  if (it.cover && (it.cover.text || it.cover.image)) pages.push(it.cover);
+  return pages.concat(it.story || []);
+}
+function showIntroPage() {
+  var pages = introPages(), k = S.play.page, it = S.play.intro;
+  if (!pages.length || k >= pages.length) return beginPlay();
+  var pg = pages[k];
+  app.innerHTML = '<div class="play"><div class="bar"><b>' + esc(it.title) + '</b>' + (S.play.test ? ' <span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span>' + it.total + ' 題 · ' + Math.round(it.timeLimitSec / 60) + ' 分鐘</span></div>' +
+    '<div class="pcard">' + (k === 0 ? '<h2>' + esc(it.title) + '</h2>' : '') + (pg.image ? '<img src="' + pg.image + '">' : '') + '<div class="txt">' + esc(pg.text) + '</div>' +
+    '<button class="pbtn" data-act="introNext">' + (k === pages.length - 1 ? '開始挑戰（開始計時）' : '下一頁') + '</button></div></div>';
+}
+function beginPlay() {
+  app.innerHTML = '<div class="play"><p>計時開始…</p></div>';
+  api('playBegin', S.play.id).then(applyPlayState).catch(fail);
+}
+function applyPlayState(st) {
+  var P = S.play;
+  P.state = st;
+  P.deadline = Date.now() + st.remainingSec * 1000;
+  if (st.result) return showEnding(st);
+  if (st.blocks) { P.blocks = st.blocks; P.pid = st.puzzleId; }
+  P.hintAt = st.nextHintInSec >= 0 ? Date.now() + st.nextHintInSec * 1000 : -1;
+  P.coolAt = Date.now() + (st.cooldownSec || 0) * 1000;
+  renderPlay();
+}
+function renderPlay(msg, good) {
+  clearTimers();
+  var P = S.play, st = P.state;
+  if (P.pid !== st.puzzleId) { api('playState', P.id, '').then(applyPlayState).catch(fail); return; }
+  // 同一題只畫一次題目內容，避免 HTML 小遊戲被重新載入
+  if (P.renderedPid !== st.puzzleId || !document.getElementById('blocks')) {
+    app.innerHTML = '<div class="play"><div class="bar"><span id="barIdx"></span>' + (P.test ? '<span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span class="timer" id="tm">' + fmtSec(st.remainingSec) + '</span></div>' +
+      '<div class="pcard"><h2>' + esc(st.title) + '</h2><div id="blocks"></div></div><div class="pcard" id="panel"></div></div>';
+    renderPlayBlocks(document.getElementById('blocks'), P.blocks, false);
+    P.renderedPid = st.puzzleId;
+    window.scrollTo(0, 0);
+  }
+  document.getElementById('barIdx').textContent = '第 ' + (st.index + 1) + ' / ' + st.total + ' 題';
+  document.getElementById('panel').innerHTML = '<div class="gate">' + (st.gateCount > 1 ? '第 ' + (st.gate + 1) + ' / ' + st.gateCount + ' 步：' + esc(st.gateLabel) : '輸入答案') + '</div>' +
+    '<input class="pin" id="ans" autocomplete="off" autocapitalize="off"><button class="pbtn" id="goBtn" data-act="answer">送出</button>' +
+    '<div class="pmsg ' + (good ? 'good' : 'bad') + '" id="pmsg">' + esc(msg || '') + '</div>' +
+    st.hintsShown.map(function (t, i) { return '<div class="phint">提示 ' + (i + 1) + '：' + esc(t) + '</div>'; }).join('') +
+    (st.hintTotal > st.hintsShown.length ? '<button class="pbtn ghost" id="hintBtn" data-act="hint"></button>' : '');
+  var inp = document.getElementById('ans');
+  inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendAnswer(); });
+  tickPlay();
+  S.timers.push(setInterval(tickPlay, 500));
+}
+function renderPlayBlocks(el, blocks, local) {
+  el.innerHTML = (blocks || []).map(function (b, i) {
+    if (b.type === 'text') return '<div class="txt">' + esc(b.text) + '</div>';
+    if (b.type === 'image') return '<img ' + (local ? 'data-file="' + esc(b.fileId) + '"' : 'src="' + b.src + '"') + ' alt="">' + (b.caption ? '<div class="cap">' + esc(b.caption) + '</div>' : '');
+    if (b.type === 'audio') return '<audio controls ' + (local ? 'data-file="' + esc(b.fileId) + '"' : 'src="' + b.src + '"') + '></audio>' + (b.caption ? '<div class="cap">' + esc(b.caption) + '</div>' : '');
+    if (b.type === 'link') return '<p><a target="_blank" rel="noopener" href="' + esc(b.url) + '">🔗 ' + esc(b.label || b.url) + '</a></p>';
+    if (b.type === 'html') return '<iframe sandbox="allow-scripts allow-popups allow-forms" data-hi="' + i + '" style="height:' + (Number(b.height) || 520) + 'px"></iframe>';
+    return '';
+  }).join('');
+  el.querySelectorAll('iframe[data-hi]').forEach(function (f) {
+    var b = blocks[Number(f.getAttribute('data-hi'))];
+    if (!local) { f.srcdoc = b.html; return; }
+    if (b.fileId) fileData(b.fileId).then(function (d) { f.srcdoc = d.text || ''; });
+  });
+  if (local) hydrateFiles(el);
+}
+function tickPlay() {
+  var P = S.play;
+  if (!P || S.view !== 'play') return;
+  var left = Math.max(0, Math.ceil((P.deadline - Date.now()) / 1000));
+  var tm = document.getElementById('tm');
+  if (tm) { tm.textContent = fmtSec(left); tm.className = 'timer' + (left < 120 ? ' low' : ''); }
+  if (left <= 0 && !P.timingOut) {
+    P.timingOut = true;
+    api('playState', P.id, P.pid).then(function (st) { P.timingOut = false; applyPlayState(st); }).catch(function () { P.timingOut = false; });
+    return;
+  }
+  var hb = document.getElementById('hintBtn');
+  if (hb) {
+    var w = P.hintAt < 0 ? -1 : Math.ceil((P.hintAt - Date.now()) / 1000);
+    var n = P.state.hintsShown.length + 1;
+    hb.disabled = w > 0;
+    hb.textContent = w > 0 ? '提示 ' + n + '（' + w + ' 秒後可看）' : '看提示 ' + n;
+  }
+  var gb = document.getElementById('goBtn');
+  if (gb) {
+    var c = Math.ceil((P.coolAt - Date.now()) / 1000);
+    gb.disabled = c > 0 || P.busy;
+    gb.textContent = c > 0 ? '請等 ' + c + ' 秒' : '送出';
+  }
+}
+function sendAnswer() {
+  var P = S.play, inp = document.getElementById('ans');
+  if (!inp || P.busy) return;
+  var v = inp.value;
+  if (!v.trim()) { var m = document.getElementById('pmsg'); m.className = 'pmsg bad'; m.textContent = '請先輸入答案'; return; }
+  if (Date.now() < P.coolAt) return;
+  P.busy = true; tickPlay();
+  api('playAnswer', P.id, v).then(function (r) {
+    P.busy = false;
+    var st = r.state;
+    if (r.solved) {
+      flash(st.result === 'escaped' ? '逃脫成功！' : '解開了！', function () { applyPlayState(st); });
+      return;
+    }
+    P.state = st;
+    P.deadline = Date.now() + st.remainingSec * 1000;
+    P.hintAt = st.nextHintInSec >= 0 ? Date.now() + st.nextHintInSec * 1000 : -1;
+    P.coolAt = Date.now() + (st.cooldownSec || 0) * 1000;
+    if (st.result) return showEnding(st);
+    if (r.gatePassed) return renderPlay('正確！繼續下一步', true);
+    if (r.wait) return renderPlay('請稍等再作答');
+    renderPlay('答案不對，再想想');
+  }).catch(function (e) { P.busy = false; fail(e); });
+}
+function flash(text, then) {
+  var f = document.createElement('div');
+  f.className = 'flash'; f.textContent = text;
+  document.body.appendChild(f);
+  setTimeout(function () { f.remove(); then(); }, 1100);
+}
+function askHint() {
+  var P = S.play;
+  api('playHint', P.id).then(function (r) { applyPlayState(r.state); }).catch(fail);
+}
+function showEnding(st) {
+  clearTimers();
+  var P = S.play;
+  S.view = 'playEnd';
+  var e = st.ending || {};
+  var h = '<div class="play"><div class="pcard"><h2>' + (st.result === 'escaped' ? '逃脫成功！' : '時間到') + '</h2>' + (e.image ? '<img src="' + e.image + '">' : '') + '<div class="txt">' + esc(e.text) + '</div>' +
+    '<p style="color:#aab3bd">用時 ' + fmtSec(st.elapsedSec) + '</p></div>';
+  h += '<div class="pcard"><h2>幫每一題評難易度</h2><p style="color:#aab3bd">1 顆星最容易，5 顆星最難。</p>' + (st.rateList || []).map(function (q) {
+    return '<div style="margin:10px 0"><div>第 ' + q.no + ' 題　' + esc(q.title) + '</div><div class="stars">' + [1, 2, 3, 4, 5].map(function (v) {
+      return '<button data-act="star" data-pid="' + esc(q.id) + '" data-v="' + v + '" aria-label="' + v + ' 顆星">★</button>';
+    }).join('') + '</div></div>';
+  }).join('') +
+    '<label style="display:block;margin-top:12px">最喜歡哪一題？為什麼？</label><textarea id="liked" style="width:100%;min-height:70px;border-radius:10px;padding:10px"></textarea>' +
+    '<label style="display:block;margin-top:12px">最卡在哪裡？有沒有覺得不公平的地方？</label><textarea id="stuck" style="width:100%;min-height:70px;border-radius:10px;padding:10px"></textarea>' +
+    '<button class="pbtn" data-act="sendRate">送出回饋</button></div></div>';
+  app.innerHTML = h;
+}
+function finishRate() {
+  var P = S.play;
+  var list = Object.keys(P.rate).map(function (k) { return { id: k, rating: P.rate[k] }; });
+  api('playRate', P.id, list, document.getElementById('liked').value, document.getElementById('stuck').value).then(function () {
+    app.innerHTML = '<div class="play"><div class="pcard center"><h2>謝謝你的回饋！</h2>' +
+      (P.test && S.code ? '<button class="pbtn" data-act="backFromTest">回到編輯</button>' : '<p>可以把平板交給下一隊了。</p><button class="pbtn ghost" data-act="toLogin">回到首頁</button>') + '</div></div>';
+  }).catch(fail);
+}
+
+/* ============================================================
+   事件
+   ============================================================ */
+app.addEventListener('input', function (e) {
+  var t = e.target, f = t.getAttribute('data-f');
+  if (!f || !S.saver) return;
+  var obj = S.target === 'room' ? S.room : S.puzzle;
+  var v = t.value;
+  if (t.getAttribute('data-num')) v = v === '' ? '' : Number(v);
+  setPath(obj, f, v);
+  S.saver.touch();
+});
+app.addEventListener('change', function (e) {
+  var t = e.target;
+  if (t.tagName === 'SELECT' && t.getAttribute('data-f') && S.saver) {
+    setPath(S.target === 'room' ? S.room : S.puzzle, t.getAttribute('data-f'), t.value);
+    S.saver.touch();
+    return;
+  }
+  var up = t.getAttribute('data-upload');
+  if (!up || !t.files || !t.files[0]) return;
+  var file = t.files[0];
+  if (up === 'block' || up === 'html') {
+    var i = Number(t.getAttribute('data-i')), b = S.puzzle.blocks[i];
+    var meta = { roomId: S.puzzle.roomId, puzzleId: S.puzzle.id, label: BLOCK_TYPES[b.type] };
+    var job = up === 'html'
+      ? prepareHtml(file).then(function (html) {
+          if (html === null) return null;
+          toast('上傳中…');
+          return api('uploadFile', S.code, { roomId: S.puzzle.roomId, puzzleId: S.puzzle.id, label: 'HTML', name: file.name, mime: 'text/html' }, html, true)
+            .then(function (r) { S.fileCache[r.fileId] = { mime: 'text/html', text: html }; r.fileName = file.name; return r; });
+        })
+      : uploadMedia(file, b.type, meta);
+    job.then(function (r) {
+      if (!r) return;
+      b.fileId = r.fileId;
+      if (r.fileName) b.fileName = r.fileName;
+      toast('上傳完成');
+      S.saver.touch();
+      renderPuzzleEditor();
+    }).catch(fail);
+  }
+  if (up === 'roomimg' || up === 'mindmap') {
+    var path = up === 'mindmap' ? 'mindmap.fileId' : t.getAttribute('data-path');
+    uploadMedia(file, /pdf/.test(file.type) ? 'file' : 'image', { roomId: S.room.id, label: up === 'mindmap' ? '心智圖' : t.getAttribute('data-label') }).then(function (r) {
+      setPath(S.room, path, r.fileId);
+      toast('上傳完成');
+      S.saver.touch();
+      renderRoomEditor();
+    }).catch(fail);
+  }
+});
+document.addEventListener('click', function (e) {
+  var el = e.target.closest('[data-act]');
+  if (!el || el.disabled) return;
+  var act = el.getAttribute('data-act'), id = el.getAttribute('data-id');
+  if (el.tagName === 'A') e.preventDefault();
+  var A = ACTIONS[act];
+  if (A) A(el, id);
+});
+var ACTIONS = {
+  closeModal: function () { closeModal(); },
+  login: function () { var c = document.getElementById('code').value.trim(); if (!c) return toast('請輸入代碼', 'err'); doLogin(c); },
+  toPlay: function () { var c = document.getElementById('pcode').value.trim().toUpperCase(); if (!c) return toast('請輸入遊戲代碼', 'err'); showPlayEntry(c); },
+  toLogin: function () { S.play = null; S.me ? (S.me.role === 'admin' ? showAdmin() : S.me.role === 'teacher' ? showTeacherHome() : showGroupHome()) : showLogin(); },
+  logout: function () { leaveEditor().then(function () { store('erCode', null); S.me = null; S.code = null; showLogin(); }); },
+  editRoom: function () { openRoomEditor(); },
+  backRoom: function () { backFromRoom(); },
+  backPuzzle: function () { backFromPuzzle(); },
+  openPuzzle: function (el, id) { if (S.ws.mode === 'teacher') return api('getPuzzle', S.code, id).then(function (p) { var i = S.ws.puzzles.map(function (x) { return x.id; }).indexOf(id); S.ws.puzzles[i] = p; openPuzzle(id); }).catch(fail); openPuzzle(id); },
+  newPuzzle: function () { api('newPuzzle', S.code).then(function (p) { p.editable = true; S.ws.puzzles.push(p); openPuzzle(p.id); }).catch(fail); },
+  movePuzzle: function (el, id) { api('movePuzzle', S.code, id, Number(el.getAttribute('data-dir'))).then(showGroupHome).catch(fail); },
+  deletePuzzle: function () {
+    confirmBox('確定要刪除「' + (S.puzzle.title || '這一題') + '」嗎？刪除後無法復原。', '刪除').then(function (ok) {
+      if (!ok) return;
+      S.saver = null;
+      api('deletePuzzle', S.code, S.puzzle.id).then(function () { toast('已刪除'); S.ws.mode === 'teacher' ? showTeacherHome() : showGroupHome(); }).catch(fail);
+    });
+  },
+  setKind: function (el) { S.puzzle.kind = el.getAttribute('data-k'); S.saver.touch(); app.querySelectorAll('[data-act=setKind]').forEach(function (b) { b.className = b === el ? 'on' : ''; }); },
+  addRow: function (el) {
+    var arr = el.getAttribute('data-arr'), p = S.puzzle;
+    p[arr] = p[arr] || [];
+    if (arr === 'steps') p.steps.push({ get: '', act: '', result: '', checkpoint: '' });
+    if (arr === 'hints') p.hints.push({ text: '', delaySec: (S.me.settings.defaultHintDelaySec || 60) * (p.hints.length + 1) });
+    if (arr === 'props') p.props.push({ item: '', place: '' });
+    S.saver.touch(); renderPuzzleEditor();
+  },
+  delRow: function (el) {
+    var arr = el.getAttribute('data-arr'), i = Number(el.getAttribute('data-i'));
+    S.puzzle[arr].splice(i, 1); S.saver.touch(); renderPuzzleEditor();
+  },
+  addBlock: function (el) {
+    var t = el.getAttribute('data-t'), b = { type: t };
+    if (t === 'text') b.text = '';
+    if (t === 'html') b.height = 520;
+    if (t === 'link') { b.url = ''; b.label = ''; }
+    S.puzzle.blocks = S.puzzle.blocks || [];
+    S.puzzle.blocks.push(b); S.saver.touch(); renderPuzzleEditor();
+  },
+  moveBlock: function (el) {
+    var i = Number(el.getAttribute('data-i')), j = i + Number(el.getAttribute('data-dir')), bl = S.puzzle.blocks;
+    if (j < 0 || j >= bl.length) return;
+    var t = bl[i]; bl[i] = bl[j]; bl[j] = t; S.saver.touch(); renderPuzzleEditor();
+  },
+  previewHtml: function (el) {
+    var b = S.puzzle.blocks[Number(el.getAttribute('data-i'))];
+    fileData(b.fileId).then(function (d) {
+      var dlg = modal('<h3>預覽</h3><iframe sandbox="allow-scripts allow-popups allow-forms" style="width:100%;height:' + (Number(b.height) || 520) + 'px;border:1px solid #ccc;border-radius:8px"></iframe>');
+      dlg.querySelector('iframe').srcdoc = d.text || '';
+    }).catch(fail);
+  },
+  previewPuzzle: function () { previewPuzzle(S.puzzle); },
+  previewById: function (el, id) { previewPuzzle(S.viewPuzzles.filter(function (p) { return p.id === id; })[0]); },
+  addStory: function () { S.room.story = S.room.story || []; S.room.story.push({ text: '', imageId: '' }); S.saver.touch(); renderRoomEditor(); },
+  delStory: function (el) { S.room.story.splice(Number(el.getAttribute('data-i')), 1); S.saver.touch(); renderRoomEditor(); },
+  clearImg: function (el) { setPath(S.room, el.getAttribute('data-path'), ''); S.saver.touch(); renderRoomEditor(); },
+  testPlay: function () {
+    var go = function () { api('startTestPlay', S.code, S.ws.room.id).then(function (intro) { S.testReturn = S.ws.mode === 'admin' ? S.ws.room.id : 'group'; enterPlay(intro); }).catch(fail); };
+    go();
+  },
+  backFromTest: function () {
+    S.play = null;
+    if (S.me.role === 'admin') return S.testReturn && S.testReturn !== 'group' && S.testReturn !== 'admin' ? adminOpenWorkspace(S.testReturn) : showAdmin();
+    showGroupHome();
+  },
+  submitRoom: function () {
+    confirmBox('送審後內容會鎖定，要修改得請老師開放（只能開放一次）。確定送審嗎？', '送審').then(function (ok) {
+      if (!ok) return;
+      api('submitRoom', S.code).then(function (r) {
+        if (!r.ok) { S.ws.roomChecks = r.roomChecks; renderWorkspace(); toast('還有紅燈沒處理完', 'err'); return; }
+        toast('已送審');
+        showGroupHome();
+      }).catch(fail);
+    });
+  },
+  // 玩家
+  playStart: function (el) {
+    var team = document.getElementById('team').value.trim();
+    if (!team) { document.getElementById('pmsg').textContent = '請先輸入隊名'; return; }
+    el.disabled = true;
+    api('playStart', el.getAttribute('data-code'), team).then(enterPlay).catch(function (e) { el.disabled = false; document.getElementById('pmsg').textContent = e.message; });
+  },
+  introNext: function () { S.play.page++; showIntroPage(); },
+  answer: function () { sendAnswer(); },
+  hint: function () { askHint(); },
+  star: function (el) {
+    var pid = el.getAttribute('data-pid'), v = Number(el.getAttribute('data-v'));
+    S.play.rate[pid] = v;
+    el.parentNode.querySelectorAll('button').forEach(function (b) { b.className = Number(b.getAttribute('data-v')) <= v ? 'on' : ''; });
+  },
+  sendRate: function () { finishRate(); },
+  // 管理者
+  toAdmin: function () { leaveEditor().then(function () { showAdmin(S.admin.tab); }); },
+  toAdminBank: function () { showAdmin('bank'); },
+  toAdminCodes: function () { showAdmin('codes'); },
+  adminTab: function (el) { S.admin.tab = el.getAttribute('data-tab'); renderAdmin(); },
+  refreshAdmin: function () { showAdmin(S.admin.tab); },
+  adminView: function (el, id) { adminView(id); },
+  adminEdit: function (el, id) {
+    var r = S.admin.data.rooms.filter(function (x) { return x.id === id; })[0];
+    if (r.kind === 'teacher') return ACTIONS.trEdit(el, id);
+    adminOpenWorkspace(id);
+  },
+  trEdit: function (el, id) {
+    S.ws = { room: { id: id }, mode: 'admin', puzzles: [], members: [], returnTo: 'bank' };
+    openRoomEditor();
+  },
+  roomAction: function (el, id) {
+    var a = el.getAttribute('data-a');
+    var msg = { approve: '確定審核通過？', unlock: '開放這組修改？（會記錄開放次數）', publish: '發布（或更新）這個密室？會凍結目前的內容成為遊玩版本。', unpublish: '下架後玩家就不能再用遊戲代碼進入。確定下架？' }[a];
+    confirmBox(msg).then(function (ok) {
+      if (!ok) return;
+      api('adminRoomAction', S.code, id, a).then(function (r) {
+        toast('完成');
+        showAdmin(S.admin.tab).then(function () { if (a === 'publish') ACTIONS.playQr(null, id); });
+      }).catch(fail);
+    });
+  },
+  playQr: function (el, id) {
+    var r = S.admin.data.rooms.filter(function (x) { return x.id === id; })[0];
+    var url = S.admin.data.appUrl ? S.admin.data.appUrl + '?p=' + r.playCode : '';
+    modal('<h3>' + esc(r.title) + '</h3><p>遊戲代碼</p><div class="big">' + esc(r.playCode) + '</div><div class="qr" data-qr="' + esc(url) + '" style="margin:10px 0"></div><p class="muted" style="word-break:break-all">' + esc(url) + '</p>');
+    document.querySelectorAll('#modal [data-qr]').forEach(function (q) { if (url) { try { new QRCode(q, { text: url, width: 200, height: 200 }); } catch (e) { } } });
+  },
+  adminTest: function (el, id) { api('startTestPlay', S.code, id).then(function (intro) { S.testReturn = 'admin'; enterPlay(intro); }).catch(fail); },
+  adminStats: function (el, id) { adminStats(id); },
+  adminExport: function (el, id) {
+    var d = modal('<h3>匯出 HTML</h3><p class="help">檔案會存到雲端硬碟「密室工坊／匯出」資料夾。整間密室版可以在網路不穩時用筆電瀏覽器離線遊玩（答案已加密）。</p><div class="btns"><button class="btn" id="exRoom">整間密室一個檔</button><button class="btn ghost" id="exEach">一題一個檔</button></div><div id="exOut"></div>');
+    var run = function (mode) {
+      d.querySelector('#exOut').innerHTML = '<p class="muted">匯出中，題目多時需要一點時間…</p>';
+      api('adminExport', S.code, id, mode).then(function (r) {
+        d.querySelector('#exOut').innerHTML = '<p><a target="_blank" href="' + esc(r.folderUrl) + '">開啟匯出資料夾</a></p><ul>' + r.files.map(function (f) { return '<li><a target="_blank" href="' + esc(f.url) + '">' + esc(f.name) + '</a></li>'; }).join('') + '</ul>';
+      }).catch(function (e) { d.querySelector('#exOut').innerHTML = ''; fail(e); });
+    };
+    d.querySelector('#exRoom').onclick = function () { run('room'); };
+    d.querySelector('#exEach').onclick = function () { run('puzzles'); };
+  },
+  materials: function () { showMaterials(); },
+  print: function () { window.print(); },
+  bankOpen: function (el, id) {
+    api('adminGetPuzzle', S.code, id).then(function (p) { S.ws = { mode: 'admin', puzzles: [p], room: { id: 'BANK' }, members: [], returnTo: 'bank' }; openPuzzle(id); }).catch(fail);
+  },
+  createTR: function () {
+    var n = document.getElementById('trName').value.trim();
+    if (!n) return toast('請輸入名稱', 'err');
+    api('adminCreateTeacherRoom', S.code, n).then(function () { showAdmin('bank'); }).catch(fail);
+  },
+  assemble: function (el, id) { showAssemble(id); },
+  asmAdd: function (el, id) { S.assemble.ids.push(id); renderAssemble(); },
+  asmDel: function (el) { S.assemble.ids.splice(Number(el.getAttribute('data-i')), 1); renderAssemble(); },
+  asmMove: function (el) { var a = S.assemble.ids, i = Number(el.getAttribute('data-i')), j = i + Number(el.getAttribute('data-dir')); if (j < 0 || j >= a.length) return; var t = a[i]; a[i] = a[j]; a[j] = t; renderAssemble(); },
+  asmSave: function () { api('adminSetRoomPuzzles', S.code, S.assemble.roomId, S.assemble.ids).then(function () { toast('已儲存'); showAdmin('bank'); }).catch(fail); },
+  saveCode: function (el) {
+    var c = el.getAttribute('data-code');
+    var nm = document.querySelector('[data-codename="' + c + '"]'), mm = document.querySelector('[data-codemem="' + c + '"]');
+    var data = { name: nm ? nm.value : undefined };
+    if (mm) data.members = mm.value;
+    api('adminUpdateCode', S.code, c, data).then(function () { toast('已儲存'); showAdmin('codes'); }).catch(fail);
+  },
+  createGroups: function () {
+    var lines = document.getElementById('newGroups').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    var list = lines.map(function (l) { var m = l.split(/[:：]/); return { name: m[0].trim(), members: (m[1] || '').trim() }; });
+    if (!list.length) return toast('請先輸入分組', 'err');
+    api('adminCreateGroups', S.code, list).then(function (r) { toast('已建立 ' + r.length + ' 組'); showAdmin('codes'); }).catch(fail);
+  },
+  createTeachers: function () {
+    var names = document.getElementById('newTeachers').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    if (!names.length) return toast('請先輸入姓名', 'err');
+    api('adminCreateTeachers', S.code, names).then(function (r) { toast('已建立 ' + r.length + ' 位'); showAdmin('codes'); }).catch(fail);
+  },
+  printCodes: function () { printCodes(); },
+  saveSettings: function () {
+    var data = {};
+    document.querySelectorAll('[data-set]').forEach(function (i) { data[i.getAttribute('data-set')] = i.type === 'checkbox' ? i.checked : i.value; });
+    api('adminSaveSettings', S.code, data).then(function (s) { S.me.settings = s; S.admin.data.settings = s; toast('已儲存設定'); }).catch(fail);
+  }
+};
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter' && e.target.id === 'code') ACTIONS.login();
+  if (e.key === 'Enter' && e.target.id === 'pcode') ACTIONS.toPlay();
+});
+boot();
+</script>
+</body>
+</html>

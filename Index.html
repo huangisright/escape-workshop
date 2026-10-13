@@ -114,6 +114,12 @@ body.playing{background:#12161b;color:#eef0f2}
 .play textarea{background:#0e1216;color:#fff;border:1px solid #3a4552}
 .flash{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0b0e12e6;z-index:60;font-size:40px;font-weight:800;color:#8fe0a6}
 .testtag{background:#f3c969;color:#222;border-radius:6px;padding:1px 8px;font-size:13px}
+.frags{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px;color:#aab3bd;font-size:15px}
+.frag{min-width:40px;height:44px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;background:#f3c969;color:#1b1b1b;font-weight:800;font-size:20px}
+.frag.empty{background:#2b343f;color:#6f7a86}
+.vaultnote{border:1px solid #3d6b4f;background:#16251c;color:#bfe8cc;border-radius:12px;padding:10px 14px;margin-bottom:14px}
+.prow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.frag-in{width:70px!important;text-align:center}
 /* 列印 */
 .printonly{display:none}
 @media print{.top,.noprint,#toast{display:none!important}.printonly{display:block}body{background:#fff}.card{break-inside:avoid;border-color:#999}.wrap{max-width:none;padding:0}}
@@ -647,6 +653,7 @@ function previewPuzzle(p) {
 function openRoomEditor() {
   var ws = S.ws;
   var go = function (room) {
+    if (!room.finale) room.finale = { enabled: false, text: '', imageId: '', answer: '', hint: '' };
     S.room = room;
     S.target = 'room';
     var editable = ws.mode === 'admin' || room.editable;
@@ -685,6 +692,7 @@ function renderRoomEditor() {
   if (!ro && (r.story || []).length < 3) h += '<div class="btns"><button class="btn ghost sm" data-act="addStory">＋ 新增說明頁</button></div>';
   h += '</div>';
   h += '<div class="card"><h3>結局</h3>' + mediaPageHtml('success', r.success, '成功頁（逃脫成功）', ro) + mediaPageHtml('fail', r.fail, '失敗頁（時間到）', ro) + '</div>';
+  if (admin && r.kind === 'teacher') h += optionalPlayHtml(r);
   if (r.kind === 'group') {
     h += '<div class="card"><h3>密室結構心智圖</h3><p class="help">上傳 GitMind 匯出的圖片，或貼上分享連結。</p>';
     if (r.mindmap && r.mindmap.fileId) h += '<img class="thumb" data-file="' + esc(r.mindmap.fileId) + '" alt="心智圖">';
@@ -693,6 +701,19 @@ function renderRoomEditor() {
   }
   app.innerHTML = h + '</div>';
   hydrateFiles();
+}
+/** 選用玩法（只有管理者看得到）：跳過扣時、終章碎片。碎片與寶庫在「挑題與排序」設定。 */
+function optionalPlayHtml(r) {
+  var f = r.finale || {};
+  var h = '<div class="card"><h3>選用玩法</h3><p class="help">都不設定就是一般密室。碎片與寶庫題目在「示範密室與題庫」→「挑題與排序」設定。</p>';
+  h += '<label class="f">跳過一題扣幾分鐘（0 = 不能跳過；跳過照樣拿到碎片）</label><input type="number" min="0" data-num="1" data-f="skipMin" value="' + esc(r.skipMin || 0) + '">';
+  h += '<label style="display:flex;gap:8px;align-items:center;margin:16px 0 6px"><input type="checkbox" data-check="finale.enabled"' + (f.enabled ? ' checked' : '') + '>開啟終章：每題拿一塊碎片，全部解完後拼成終章密碼</label>';
+  if (f.enabled) {
+    h += mediaPageHtml('finale', f, '終章頁（玩家看到的故事與指示）', false);
+    h += '<div class="row"><div><label class="f">終章密碼（留白 = 碎片依序接起來）</label><input type="text" data-f="finale.answer" value="' + esc(f.answer) + '"></div>' +
+      '<div><label class="f">終章提示（一開始就能看）</label><input type="text" data-f="finale.hint" value="' + esc(f.hint) + '"></div></div>';
+  }
+  return h + '</div>';
 }
 function backFromRoom() {
   leaveEditor().then(function () {
@@ -772,12 +793,19 @@ function adminBankHtml(d) {
   h += '<div class="card"><h3>示範密室</h3><p class="help">從題庫挑題目、排順序，組成一間密室。發布時會凍結當下的版本，之後老師再改題目也不會影響正在玩的人。</p>';
   trooms.forEach(function (r) {
     h += '<div class="sub"><div class="hd">' + esc(r.title) + '<span class="sp"></span>' + statusChip(r.status) + (r.published ? ' <span class="chip pub">' + esc(r.playCode) + '</span>' : '') + '</div>' +
-      '<p style="margin:0 0 6px;font-size:14px">' + sumDots(r.summary) + ' · ' + r.puzzleCount + ' 題 · 預估 ' + r.estTotal + ' / ' + r.timeLimitMin + ' 分鐘</p>' +
+      '<p style="margin:0 0 6px;font-size:14px">' + sumDots(r.summary) + ' · ' + r.puzzleCount + ' 題 · 預估 ' + r.estTotal + ' / ' + r.timeLimitMin + ' 分鐘' + playExtrasText(r) + '</p>' +
       '<div class="btns"><button class="btn sm" data-act="assemble" data-id="' + r.id + '">挑題與排序</button><button class="btn ghost sm" data-act="trEdit" data-id="' + r.id + '">封面、說明、結局</button>' +
       '<button class="btn ghost sm" data-act="adminView" data-id="' + r.id + '">檢視</button></div></div>';
   });
   h += '<div class="row"><div><label class="f">新的示範密室名稱</label><input type="text" id="trName" placeholder="例如：氣候變遷密室"></div><div style="flex:none"><button class="btn" data-act="createTR">建立</button></div></div></div>';
   return h;
+}
+function playExtrasText(r) {
+  var x = [];
+  if (r.finale && r.finale.enabled) x.push('終章碎片');
+  if (Number(r.skipMin) > 0) x.push('跳過扣 ' + r.skipMin + ' 分');
+  if ((r.vaultIds || []).length) x.push('寶庫 ' + r.vaultIds.length + ' 題');
+  return x.length ? ' · ' + x.join('、') : '';
 }
 function adminCodesHtml(d) {
   var url = d.appUrl || '';
@@ -814,9 +842,10 @@ function loadLive() {
   api('adminLive', S.code).then(function (rows) {
     var b = document.getElementById('adminBody');
     if (!b || S.admin.tab !== 'live') return;
-    b.innerHTML = '<div class="card"><h3>最近三小時的遊戲 <span class="muted" style="font-size:13px">每 10 秒更新</span></h3>' + (rows.length ? '<table><tr><th>隊伍</th><th>密室</th><th>進度</th><th>時間</th><th>提示</th><th>答錯</th><th>狀態</th></tr>' + rows.map(function (r) {
-      return '<tr><td>' + esc(r.team) + (r.test ? ' <span class="chip">試玩</span>' : '') + '</td><td>' + esc(r.room) + '</td><td>' + (r.result ? r.total : r.index + 1) + ' / ' + r.total + '</td><td>' + fmtSec(r.elapsedSec) + '</td><td>' + (r.hints || 0) + '</td><td>' + r.wrong + '</td><td>' +
-        (r.result === 'escaped' ? '<span class="chip approved">逃脫成功</span>' : r.result === 'timeout' ? '<span class="chip submitted">時間到</span>' : '<span class="chip draft">進行中</span>') + '</td></tr>';
+    b.innerHTML = '<div class="card"><h3>最近三小時的遊戲 <span class="muted" style="font-size:13px">每 10 秒更新</span></h3>' + (rows.length ? '<table><tr><th>隊伍</th><th>密室</th><th>進度</th><th>時間</th><th>提示</th><th>答錯</th><th>跳過</th><th>狀態</th></tr>' + rows.map(function (r) {
+      var where = r.phase === 'finale' ? '終章' : r.phase === 'vault' ? '寶庫 ' + (r.vaultIndex + 1) + ' / ' + r.vaultTotal : (r.result ? r.total : r.index + 1) + ' / ' + r.total;
+      return '<tr><td>' + esc(r.team) + (r.test ? ' <span class="chip">試玩</span>' : '') + '</td><td>' + esc(r.room) + '</td><td>' + where + '</td><td>' + fmtSec(r.elapsedSec) + '</td><td>' + (r.hints || 0) + '</td><td>' + r.wrong + '</td><td>' + (r.skips || 0) + '</td><td>' +
+        (r.result === 'escaped' ? '<span class="chip approved">逃脫成功' + (r.escapeSec !== null && r.escapeSec !== undefined ? ' ' + fmtSec(r.escapeSec) : '') + '</span>' + (r.vaultTotal ? ' <span class="chip">寶物 ' + r.vaultSolved + '</span>' : '') : r.result === 'timeout' ? '<span class="chip submitted">時間到</span>' : '<span class="chip draft">進行中</span>') + '</td></tr>';
     }).join('') + '</table>' : '<p class="muted">目前沒有遊戲。</p>') + '</div>';
   }).catch(function () { });
 }
@@ -842,7 +871,20 @@ function adminView(roomId) {
         '<div class="btns"><button class="btn ghost sm" data-act="previewById" data-id="' + p.id + '">用玩家角度看</button></div>' +
         '<h3 style="font-size:16px;margin-top:12px">檢核</h3>' + checksHtml(p.checks) + '</div>';
     });
-    S.viewPuzzles = d.puzzles;
+    var fin = r.finale || {};
+    if (fin.enabled || Number(r.skipMin) > 0) {
+      h += '<div class="card"><h3>選用玩法</h3><div class="kv">' +
+        '<span class="muted">跳過</span><span>' + (Number(r.skipMin) > 0 ? '扣 ' + esc(r.skipMin) + ' 分鐘' : '不能跳過') + '</span>' +
+        (fin.enabled ? '<span class="muted">碎片</span><span>' + d.puzzles.map(function (p, i) { return (i + 1) + '：' + esc((r.fragments || [])[i] || '（沒設）'); }).join('　') + '</span>' +
+          '<span class="muted">終章密碼</span><span><b>' + esc(fin.answer || (r.fragments || []).slice(0, d.puzzles.length).join('')) + '</b>' + (fin.answer ? '' : '（碎片依序）') + '</span>' +
+          '<span class="muted">終章提示</span><span>' + esc(fin.hint || '（無）') + '</span>' : '') + '</div>' +
+        (fin.enabled ? pg('終章頁', fin) : '') + '</div>';
+    }
+    (d.vault || []).forEach(function (p, i) {
+      h += '<div class="card"><h3>寶庫 ' + (i + 1) + '　' + esc(p.title) + '</h3><div class="kv"><span class="muted">負責</span><span>' + esc(p.author) + '</span><span class="muted">答案</span><span><b>' + esc(p.answer) + '</b></span></div>' +
+        '<div class="btns"><button class="btn ghost sm" data-act="previewById" data-id="' + p.id + '">用玩家角度看</button></div><h3 style="font-size:16px;margin-top:12px">檢核</h3>' + checksHtml(p.checks) + '</div>';
+    });
+    S.viewPuzzles = d.puzzles.concat(d.vault || []);
     app.innerHTML = h + '</div>';
     hydrateFiles();
   }).catch(fail);
@@ -850,12 +892,12 @@ function adminView(roomId) {
 function adminStats(roomId) {
   app.innerHTML = topbar('遊玩數據', { back: 'toAdmin' }) + '<div class="wrap"><p class="muted">載入中…</p></div>';
   api('adminStats', S.code, roomId).then(function (d) {
-    var h = topbar('數據：' + d.title, { back: 'toAdmin' }) + '<div class="wrap"><div class="card"><h3>' + esc(d.title) + '</h3><p>正式遊玩 ' + d.plays + ' 場，逃脫成功 ' + d.escaped + ' 場（試玩不列入）。</p></div>';
-    h += '<div class="card" style="overflow-x:auto"><h3>每一題</h3><table><tr><th>#</th><th>題目</th><th>負責</th><th>預估</th><th>實際平均</th><th>到達／解開</th><th>看提示</th><th>答錯</th><th>常見錯誤答案</th><th>難易度</th></tr>' + d.perPuzzle.map(function (p) {
+    var h = topbar('數據：' + d.title, { back: 'toAdmin' }) + '<div class="wrap"><div class="card"><h3>' + esc(d.title) + '</h3><p>正式遊玩 ' + d.plays + ' 場，逃脫成功 ' + d.escaped + ' 場（試玩不列入）。' + (d.avgEscapeMin !== null && d.avgEscapeMin !== undefined ? '平均逃脫時間 ' + d.avgEscapeMin + ' 分鐘（含跳過扣時）。' : '') + '</p></div>';
+    h += '<div class="card" style="overflow-x:auto"><h3>每一題</h3><table><tr><th>#</th><th>題目</th><th>負責</th><th>預估</th><th>實際平均</th><th>到達／解開</th><th>看提示</th><th>答錯</th><th>跳過</th><th>常見錯誤答案</th><th>難易度</th></tr>' + d.perPuzzle.map(function (p) {
       var slow = p.avgSolveMin !== null && p.estMinutes && p.avgSolveMin > p.estMinutes * 1.3;
-      return '<tr><td>' + p.no + '</td><td>' + esc(p.title) + '</td><td>' + esc(p.author) + '</td><td>' + (p.estMinutes || '') + ' 分</td><td' + (slow ? ' style="color:var(--err);font-weight:700"' : '') + '>' + (p.avgSolveMin === null ? '—' : p.avgSolveMin + ' 分') + '</td><td>' + p.reached + ' / ' + p.solved + '</td><td>' + p.hintsUsed + '</td><td>' + p.wrongCount + '</td><td>' +
+      return '<tr><td>' + (p.vault ? 'V' : '') + p.no + '</td><td>' + esc(p.title) + '</td><td>' + esc(p.author) + '</td><td>' + (p.estMinutes || '') + ' 分</td><td' + (slow ? ' style="color:var(--err);font-weight:700"' : '') + '>' + (p.avgSolveMin === null ? '—' : p.avgSolveMin + ' 分') + '</td><td>' + p.reached + ' / ' + p.solved + '</td><td>' + p.hintsUsed + '</td><td>' + p.wrongCount + '</td><td>' + (p.skipped || 0) + '</td><td>' +
         p.topWrong.map(function (w) { return esc(w.answer) + '×' + w.count; }).join('、') + '</td><td>' + (p.avgRating === null ? '—' : p.avgRating + '（' + p.ratingCount + '）') + '</td></tr>';
-    }).join('') + '</table><p class="help" style="margin-top:8px">紅字：實際時間比預估多 30% 以上。</p></div>';
+    }).join('') + '</table><p class="help" style="margin-top:8px">紅字：實際時間比預估多 30% 以上。V 開頭是寶庫題。</p></div>';
     h += '<div class="card"><h3>玩家回饋</h3>' + (d.comments.length ? '<ul>' + d.comments.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : '<p class="muted">還沒有。</p>') + '</div></div>';
     app.innerHTML = h;
   }).catch(fail);
@@ -863,7 +905,11 @@ function adminStats(roomId) {
 function showAssemble(roomId) {
   var d = S.admin.data;
   var room = d.rooms.filter(function (r) { return r.id === roomId; })[0];
-  S.assemble = { roomId: roomId, ids: (room.puzzleIds || []).slice() };
+  var ids = (room.puzzleIds || []).slice();
+  S.assemble = {
+    roomId: roomId, ids: ids, vault: (room.vaultIds || []).slice(),
+    frags: ids.map(function (id, i) { return (room.fragments || [])[i] || ''; })
+  };
   renderAssemble();
 }
 function renderAssemble() {
@@ -873,12 +919,21 @@ function renderAssemble() {
   d.bank.forEach(function (p) { byId[p.id] = p; });
   var total = A.ids.reduce(function (t, id) { return t + (Number((byId[id] || {}).estMinutes) || 0); }, 0);
   var h = topbar('挑題與排序：' + room.title, { back: 'toAdminBank' }) + '<div class="wrap"><div class="row" style="align-items:flex-start">';
-  h += '<div class="card" style="flex:1"><h3>題庫</h3><div class="list">' + d.bank.filter(function (p) { return A.ids.indexOf(p.id) < 0; }).map(function (p) {
-    return '<div class="item"><div class="main"><div class="t">' + esc(p.title || '（未命名）') + '</div><div class="m">' + esc(p.author) + ' · ' + (p.estMinutes || '?') + ' 分</div></div>' + sumDots(p.summary) + '<button class="btn ghost sm" data-act="asmAdd" data-id="' + p.id + '">加入 →</button></div>';
+  var finaleOn = !!(room.finale && room.finale.enabled);
+  h += '<div class="card" style="flex:1"><h3>題庫</h3><div class="list">' + d.bank.filter(function (p) { return A.ids.indexOf(p.id) < 0 && A.vault.indexOf(p.id) < 0; }).map(function (p) {
+    return '<div class="item"><div class="main"><div class="t">' + esc(p.title || '（未命名）') + '</div><div class="m">' + esc(p.author) + ' · ' + (p.estMinutes || '?') + ' 分</div><div class="prow"><button class="btn ghost sm" data-act="asmAdd" data-id="' + p.id + '">加入主線 →</button><button class="btn ghost sm" data-act="asmVault" data-id="' + p.id + '">放進寶庫</button></div></div>' + sumDots(p.summary) + '</div>';
   }).join('') + '</div></div>';
   h += '<div class="card" style="flex:1"><h3>這間密室（' + A.ids.length + ' 題，預估 ' + total + ' / ' + room.timeLimitMin + ' 分鐘）</h3><div class="list">' + A.ids.map(function (id, i) {
     var p = byId[id] || { title: '（已刪除）' };
-    return '<div class="item"><b style="width:24px">' + (i + 1) + '</b><div class="main"><div class="t">' + esc(p.title) + '</div><div class="m">' + esc(p.author || '') + '</div></div><button class="iconbtn" data-act="asmMove" data-i="' + i + '" data-dir="-1">↑</button><button class="iconbtn" data-act="asmMove" data-i="' + i + '" data-dir="1">↓</button><button class="iconbtn" data-act="asmDel" data-i="' + i + '">✕</button></div>';
+    return '<div class="item"><b style="width:24px">' + (i + 1) + '</b><div class="main"><div class="t">' + esc(p.title) + '</div><div class="m">' + esc(p.author || '') + '</div></div>' +
+      (finaleOn ? '<label class="muted" style="font-size:13px">碎片 <input type="text" class="frag-in" data-asmfrag="' + i + '" value="' + esc(A.frags[i]) + '" aria-label="第 ' + (i + 1) + ' 題的碎片"></label>' : '') +
+      '<button class="iconbtn" data-act="asmMove" data-i="' + i + '" data-dir="-1" aria-label="上移">↑</button><button class="iconbtn" data-act="asmMove" data-i="' + i + '" data-dir="1" aria-label="下移">↓</button><button class="iconbtn" data-act="asmDel" data-i="' + i + '" aria-label="移除">✕</button></div>';
+  }).join('') + '</div>';
+  if (finaleOn) h += '<p class="help" style="margin-top:8px">碎片跟著位置走：第 1 格的碎片給第 1 題，不管放的是哪位老師的題目。終章密碼留白時，就是碎片依序接起來：<b id="asmJoined">' + esc(A.frags.join('')) + '</b></p>';
+  else h += '<p class="help" style="margin-top:8px">要用碎片拼終章，先到「封面、說明、結局」開啟終章。</p>';
+  h += '<h3 style="margin-top:18px">寶庫（逃脫後的加碼題，' + A.vault.length + ' 題）</h3><p class="help">解開終章之後還有時間的隊伍，會一題接一題玩寶庫。寶庫做多做少不影響逃脫時間。</p><div class="list">' + A.vault.map(function (id, i) {
+    var p = byId[id] || { title: '（已刪除）' };
+    return '<div class="item"><b style="width:24px">V' + (i + 1) + '</b><div class="main"><div class="t">' + esc(p.title) + '</div><div class="m">' + esc(p.author || '') + '</div></div><button class="iconbtn" data-act="asmVaultMove" data-i="' + i + '" data-dir="-1" aria-label="上移">↑</button><button class="iconbtn" data-act="asmVaultMove" data-i="' + i + '" data-dir="1" aria-label="下移">↓</button><button class="iconbtn" data-act="asmVaultDel" data-i="' + i + '" aria-label="移除">✕</button></div>';
   }).join('') + '</div><div class="btns"><button class="btn" data-act="asmSave">儲存</button></div></div></div></div>';
   app.innerHTML = h;
 }
@@ -957,11 +1012,27 @@ function applyPlayState(st) {
   var P = S.play;
   P.state = st;
   P.deadline = Date.now() + st.remainingSec * 1000;
-  if (st.result) return showEnding(st);
+  if (isOver(st)) return showEnding(st);
   if (st.blocks) { P.blocks = st.blocks; P.pid = st.puzzleId; }
   P.hintAt = st.nextHintInSec >= 0 ? Date.now() + st.nextHintInSec * 1000 : -1;
   P.coolAt = Date.now() + (st.cooldownSec || 0) * 1000;
   renderPlay();
+}
+// 逃脫後還在寶庫時 result 是 escaped 但還沒結束
+function isOver(st) { return st.over === undefined ? !!st.result : st.over; }
+function playLabel(st) {
+  if (st.phase === 'finale') return '終章';
+  if (st.phase === 'vault') return '寶庫 ' + (st.vaultIndex + 1) + ' / ' + st.vaultTotal;
+  return '第 ' + (st.index + 1) + ' / ' + st.total + ' 題';
+}
+function fragmentsHtml(st) {
+  if (!st.finale) return '';
+  var h = '<div class="frags"><span>線索簿</span>';
+  for (var i = 0; i < st.total; i++) {
+    var f = st.fragments[i];
+    h += f === undefined ? '<span class="frag empty" aria-label="第 ' + (i + 1) + ' 塊碎片還沒拿到">' + (i + 1) + '</span>' : '<span class="frag" aria-label="第 ' + (i + 1) + ' 塊碎片">' + esc(f) + '</span>';
+  }
+  return h + '</div>';
 }
 function renderPlay(msg, good) {
   clearTimers();
@@ -975,12 +1046,17 @@ function renderPlay(msg, good) {
     P.renderedPid = st.puzzleId;
     window.scrollTo(0, 0);
   }
-  document.getElementById('barIdx').textContent = '第 ' + (st.index + 1) + ' / ' + st.total + ' 題';
-  document.getElementById('panel').innerHTML = '<div class="gate">' + (st.gateCount > 1 ? '第 ' + (st.gate + 1) + ' / ' + st.gateCount + ' 步：' + esc(st.gateLabel) : '輸入答案') + '</div>' +
+  document.getElementById('barIdx').textContent = playLabel(st);
+  document.getElementById('panel').innerHTML =
+    (st.phase === 'vault' ? '<div class="vaultnote">你們已經逃出來了！逃脫時間 ' + fmtSec(st.escapeSec) + '。寶庫拿到 ' + st.vaultSolved + ' 件寶物，想停就停，不影響逃脫時間。</div>' : '') +
+    '<div class="gate">' + (st.gateCount > 1 ? '第 ' + (st.gate + 1) + ' / ' + st.gateCount + ' 步：' + esc(st.gateLabel) : '輸入答案') + '</div>' +
     '<input class="pin" id="ans" autocomplete="off" autocapitalize="off"><button class="pbtn" id="goBtn" data-act="answer">送出</button>' +
     '<div class="pmsg ' + (good ? 'good' : 'bad') + '" id="pmsg">' + esc(msg || '') + '</div>' +
     st.hintsShown.map(function (t, i) { return '<div class="phint">提示 ' + (i + 1) + '：' + esc(t) + '</div>'; }).join('') +
-    (st.hintTotal > st.hintsShown.length ? '<button class="pbtn ghost" id="hintBtn" data-act="hint"></button>' : '');
+    (st.hintTotal > st.hintsShown.length ? '<button class="pbtn ghost" id="hintBtn" data-act="hint"></button>' : '') +
+    (st.canSkip && st.phase === 'main' ? ' <button class="pbtn ghost" data-act="skip">跳過這題（扣 ' + st.skipMin + ' 分鐘）</button>' : '') +
+    (st.phase === 'vault' ? ' <button class="pbtn ghost" data-act="skip">換下一題</button> <button class="pbtn ghost" data-act="finishVault">結束遊戲</button>' : '') +
+    fragmentsHtml(st);
   var inp = document.getElementById('ans');
   inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendAnswer(); });
   tickPlay();
@@ -1038,14 +1114,15 @@ function sendAnswer() {
     P.busy = false;
     var st = r.state;
     if (r.solved) {
-      flash(st.result === 'escaped' ? '逃脫成功！' : '解開了！', function () { applyPlayState(st); });
+      var won = r.escaped || (r.escaped === undefined && st.result === 'escaped');
+      flash(won ? '逃脫成功！' : r.fragment ? '解開了！拿到碎片「' + r.fragment + '」' : '解開了！', function () { applyPlayState(st); });
       return;
     }
     P.state = st;
     P.deadline = Date.now() + st.remainingSec * 1000;
     P.hintAt = st.nextHintInSec >= 0 ? Date.now() + st.nextHintInSec * 1000 : -1;
     P.coolAt = Date.now() + (st.cooldownSec || 0) * 1000;
-    if (st.result) return showEnding(st);
+    if (isOver(st)) return showEnding(st);
     if (r.gatePassed) return renderPlay('正確！繼續下一步', true);
     if (r.wait) return renderPlay('請稍等再作答');
     renderPlay('答案不對，再想想');
@@ -1057,6 +1134,23 @@ function flash(text, then) {
   document.body.appendChild(f);
   setTimeout(function () { f.remove(); then(); }, 1100);
 }
+function askSkip() {
+  var P = S.play, st = P.state;
+  var go = function () {
+    api('playSkip', P.id).then(function (r) {
+      if (r.escaped) return flash('逃脫成功！', function () { applyPlayState(r.state); });
+      if (r.fragment) return flash('跳過了，拿到碎片「' + r.fragment + '」', function () { applyPlayState(r.state); });
+      applyPlayState(r.state);
+    }).catch(fail);
+  };
+  if (st.phase === 'vault') return go();
+  confirmBox('跳過這一題會扣 ' + st.skipMin + ' 分鐘' + (st.finale ? '，但照樣拿到這一題的碎片' : '') + '。確定要跳過嗎？', '跳過').then(function (ok) { if (ok) go(); });
+}
+function finishVault() {
+  confirmBox('結束遊戲？寶庫剩下的題目就不玩了，逃脫時間不受影響。', '結束').then(function (ok) {
+    if (ok) api('playFinish', S.play.id).then(function (r) { applyPlayState(r.state); }).catch(fail);
+  });
+}
 function askHint() {
   var P = S.play;
   api('playHint', P.id).then(function (r) { applyPlayState(r.state); }).catch(fail);
@@ -1067,9 +1161,10 @@ function showEnding(st) {
   S.view = 'playEnd';
   var e = st.ending || {};
   var h = '<div class="play"><div class="pcard"><h2>' + (st.result === 'escaped' ? '逃脫成功！' : '時間到') + '</h2>' + (e.image ? '<img src="' + e.image + '">' : '') + '<div class="txt">' + esc(e.text) + '</div>' +
-    '<p style="color:#aab3bd">用時 ' + fmtSec(st.elapsedSec) + '</p></div>';
+    '<p style="color:#aab3bd">用時 ' + fmtSec(st.elapsedSec) + (st.penaltySec ? '（含跳過扣時 ' + Math.round(st.penaltySec / 60) + ' 分鐘）' : '') +
+    (st.vaultTotal && st.result === 'escaped' ? '　寶庫寶物 ' + st.vaultSolved + ' / ' + st.vaultTotal + ' 件' : '') + '</p></div>';
   h += '<div class="pcard"><h2>幫每一題評難易度</h2><p style="color:#aab3bd">1 顆星最容易，5 顆星最難。</p>' + (st.rateList || []).map(function (q) {
-    return '<div style="margin:10px 0"><div>第 ' + q.no + ' 題　' + esc(q.title) + '</div><div class="stars">' + [1, 2, 3, 4, 5].map(function (v) {
+    return '<div style="margin:10px 0"><div>' + esc(q.label || '第 ' + q.no + ' 題') + '　' + esc(q.title) + '</div><div class="stars">' + [1, 2, 3, 4, 5].map(function (v) {
       return '<button data-act="star" data-pid="' + esc(q.id) + '" data-v="' + v + '" aria-label="' + v + ' 顆星">★</button>';
     }).join('') + '</div></div>';
   }).join('') +
@@ -1092,6 +1187,12 @@ function finishRate() {
    ============================================================ */
 app.addEventListener('input', function (e) {
   var t = e.target, f = t.getAttribute('data-f');
+  if (t.hasAttribute('data-asmfrag') && S.assemble) {
+    S.assemble.frags[Number(t.getAttribute('data-asmfrag'))] = t.value;
+    var j = document.getElementById('asmJoined');
+    if (j) j.textContent = S.assemble.frags.join('');
+    return;
+  }
   if (!f || !S.saver) return;
   var obj = S.target === 'room' ? S.room : S.puzzle;
   var v = t.value;
@@ -1101,6 +1202,12 @@ app.addEventListener('input', function (e) {
 });
 app.addEventListener('change', function (e) {
   var t = e.target;
+  if (t.getAttribute('data-check') && S.saver) {
+    setPath(S.target === 'room' ? S.room : S.puzzle, t.getAttribute('data-check'), t.checked);
+    S.saver.touch();
+    if (S.target === 'room') renderRoomEditor();
+    return;
+  }
   if (t.tagName === 'SELECT' && t.getAttribute('data-f') && S.saver) {
     setPath(S.target === 'room' ? S.room : S.puzzle, t.getAttribute('data-f'), t.value);
     S.saver.touch();
@@ -1233,6 +1340,8 @@ var ACTIONS = {
   introNext: function () { S.play.page++; showIntroPage(); },
   answer: function () { sendAnswer(); },
   hint: function () { askHint(); },
+  skip: function () { askSkip(); },
+  finishVault: function () { finishVault(); },
   star: function (el) {
     var pid = el.getAttribute('data-pid'), v = Number(el.getAttribute('data-v'));
     S.play.rate[pid] = v;
@@ -1296,10 +1405,14 @@ var ACTIONS = {
     api('adminCreateTeacherRoom', S.code, n).then(function () { showAdmin('bank'); }).catch(fail);
   },
   assemble: function (el, id) { showAssemble(id); },
-  asmAdd: function (el, id) { S.assemble.ids.push(id); renderAssemble(); },
-  asmDel: function (el) { S.assemble.ids.splice(Number(el.getAttribute('data-i')), 1); renderAssemble(); },
+  asmAdd: function (el, id) { S.assemble.ids.push(id); S.assemble.frags.push(''); renderAssemble(); },
+  asmDel: function (el) { var i = Number(el.getAttribute('data-i')); S.assemble.ids.splice(i, 1); S.assemble.frags.splice(i, 1); renderAssemble(); },
+  // 碎片跟著位置走，所以排序時只動題目、不動碎片
   asmMove: function (el) { var a = S.assemble.ids, i = Number(el.getAttribute('data-i')), j = i + Number(el.getAttribute('data-dir')); if (j < 0 || j >= a.length) return; var t = a[i]; a[i] = a[j]; a[j] = t; renderAssemble(); },
-  asmSave: function () { api('adminSetRoomPuzzles', S.code, S.assemble.roomId, S.assemble.ids).then(function () { toast('已儲存'); showAdmin('bank'); }).catch(fail); },
+  asmVault: function (el, id) { S.assemble.vault.push(id); renderAssemble(); },
+  asmVaultDel: function (el) { S.assemble.vault.splice(Number(el.getAttribute('data-i')), 1); renderAssemble(); },
+  asmVaultMove: function (el) { var a = S.assemble.vault, i = Number(el.getAttribute('data-i')), j = i + Number(el.getAttribute('data-dir')); if (j < 0 || j >= a.length) return; var t = a[i]; a[i] = a[j]; a[j] = t; renderAssemble(); },
+  asmSave: function () { var A = S.assemble; api('adminSetRoomPuzzles', S.code, A.roomId, A.ids, { fragments: A.frags, vaultIds: A.vault }).then(function () { toast('已儲存'); showAdmin('bank'); }).catch(fail); },
   saveCode: function (el) {
     var c = el.getAttribute('data-code');
     var nm = document.querySelector('[data-codename="' + c + '"]'), mm = document.querySelector('[data-codemem="' + c + '"]');

@@ -401,7 +401,7 @@ function movePuzzle(code, id, dir) {
  * ============================================================ */
 
 var ROOM_FIELDS = ['title', 'cover', 'story', 'success', 'fail', 'mindmap'];
-var ROOM_ADMIN_FIELDS = ['timeLimitMin', 'location', 'groupName'];
+var ROOM_ADMIN_FIELDS = ['timeLimitMin', 'location', 'groupName', 'finale', 'skipMin'];
 
 function saveRoom(code, data) {
   var a = account_(code);
@@ -432,8 +432,21 @@ function blankRoom_(kind, ownerCode, title, s) {
     success: { text: '', imageId: '' }, fail: { text: '', imageId: '' },
     mindmap: { fileId: '', url: '' }, puzzleIds: [], status: 'draft', unlocksUsed: 0,
     published: false, playCode: '', publishedVersion: '', location: '',
-    timeLimitMin: kind === 'teacher' ? s.teacherRoomMinutes : s.playMinutes, rev: 0
+    timeLimitMin: kind === 'teacher' ? s.teacherRoomMinutes : s.playMinutes, rev: 0,
+    // 選用玩法（管理者設定）：終章碎片、跳過扣時、寶庫
+    finale: { enabled: false, text: '', imageId: '', answer: '', hint: '' },
+    fragments: [], skipMin: 0, vaultIds: []
   };
+}
+function finaleOf_(room) {
+  var f = room.finale || {};
+  return { enabled: !!f.enabled, text: f.text || '', imageId: f.imageId || '', answer: f.answer || '', hint: f.hint || '' };
+}
+function roomVault_(room) {
+  var byId = {};
+  allDocs_('Puzzles').forEach(function (p) { byId[p.id] = p; });
+  return (room.vaultIds || []).map(function (id) { return byId[id]; })
+    .filter(function (p) { return p && !p.deleted; });
 }
 function membersOfRoom_(room) {
   if (room.kind !== 'group') return [];
@@ -665,6 +678,23 @@ function checkRoom_(room, puzzles, s, members, deep) {
     var hasP = puzzles.some(function (p) { return p.kind === 'physical'; });
     if (!hasD || !hasP) chk_(c, 'warn', '數位題、實體題至少各要一題' + (!hasD ? '（缺數位題）' : '（缺實體題）'));
   }
+  var fin = finaleOf_(room);
+  if (fin.enabled) {
+    var frags = room.fragments || [];
+    var missing = [];
+    puzzles.forEach(function (p, i) { if (!String(frags[i] || '').trim()) missing.push(i + 1); });
+    if (missing.length) chk_(c, 'err', '終章：第 ' + missing.join('、') + ' 題還沒設碎片');
+    if (!String(fin.text).trim() && !fin.imageId) chk_(c, 'err', '終章頁還沒寫');
+    if (!String(fin.answer).trim() && !puzzles.length) chk_(c, 'err', '終章還沒有答案');
+  }
+  if ((room.vaultIds || []).length) {
+    roomVault_(room).forEach(function (p, i) {
+      var pc = checkPuzzle_(p, s, kind, deep);
+      var name = '寶庫第 ' + (i + 1) + ' 題「' + (p.title || '未命名') + '」';
+      var errs = pc.filter(function (x) { return x.level === 'err'; }).length;
+      if (errs) chk_(c, 'err', name + '還有 ' + errs + ' 項沒完成');
+    });
+  }
   var total = puzzles.reduce(function (t, p) { return t + (Number(p.estMinutes) || 0); }, 0);
   var limit = Number(room.timeLimitMin) || s.playMinutes;
   if (total > limit) chk_(c, 'warn', '全部預估 ' + total + ' 分鐘，超過遊玩時間 ' + limit + ' 分鐘');
@@ -704,14 +734,16 @@ function submitRoom(code) {
  *  版本快照（發布或試玩時凍結內容）
  * ============================================================ */
 
-var SNAP_ROOM_FIELDS = ['id', 'kind', 'title', 'groupName', 'cover', 'story', 'success', 'fail', 'timeLimitMin'];
+var SNAP_ROOM_FIELDS = ['id', 'kind', 'title', 'groupName', 'cover', 'story', 'success', 'fail', 'timeLimitMin',
+  'finale', 'fragments', 'skipMin'];
 var SNAP_PUZZLE_FIELDS = ['id', 'title', 'author', 'kind', 'estMinutes', 'steps', 'blocks', 'answer', 'hints', 'props'];
 
 function makeSnapshot_(room, test) {
   var pick = function (o, f) { var r = {}; f.forEach(function (k) { r[k] = o[k]; }); return r; };
   var snap = {
     room: pick(room, SNAP_ROOM_FIELDS),
-    puzzles: roomPuzzles_(room).map(function (p) { return pick(p, SNAP_PUZZLE_FIELDS); })
+    puzzles: roomPuzzles_(room).map(function (p) { return pick(p, SNAP_PUZZLE_FIELDS); }),
+    vault: (room.vaultIds || []).length ? roomVault_(room).map(function (p) { return pick(p, SNAP_PUZZLE_FIELDS); }) : []
   };
   if (!snap.puzzles.length) throw new Error('這個密室還沒有題目');
   var version = (test ? 'test-' : 'v') + Date.now().toString(36);
@@ -771,8 +803,91 @@ function introOf_(snap) {
     title: r.title, cover: mediaPage_(r.cover), story: (r.story || []).filter(function (x) {
       return String(x.text || '').trim() || x.imageId;
     }).map(mediaPage_),
-    total: snap.puzzles.length, timeLimitSec: (Number(r.timeLimitMin) || settings_().playMinutes) * 60
+    total: snap.puzzles.length, timeLimitSec: (Number(r.timeLimitMin) || settings_().playMinutes) * 60,
+    finale: finaleOn_(snap), skipMin: Number(r.skipMin) || 0, vaultTotal: (snap.vault || []).length
   };
+}
+
+/* ---------- 選用玩法：終章碎片、跳過扣時、寶庫 ----------
+ * 進度 st.phase：main（主線）→ finale（終章，有開才有）→ 逃脫 → vault（寶庫，有題才有）→ done
+ * 逃脫時間在解開最後一關的當下就定下來（含跳過扣時），寶庫做多做少都不影響。
+ */
+function finaleOn_(snap) { return !!(snap.room.finale && snap.room.finale.enabled); }
+function finaleAnswer_(snap) {
+  var f = snap.room.finale || {};
+  if (String(f.answer || '').trim()) return String(f.answer);
+  return (snap.room.fragments || []).slice(0, snap.puzzles.length).map(function (x) { return String(x || '').trim(); }).join('');
+}
+function finalePuzzle_(snap) {
+  var f = snap.room.finale || {};
+  var blocks = [];
+  if (String(f.text || '').trim()) blocks.push({ type: 'text', text: f.text });
+  if (f.imageId) blocks.push({ type: 'image', fileId: f.imageId });
+  return {
+    id: 'finale', title: '終章', blocks: blocks, steps: [], answer: finaleAnswer_(snap),
+    hints: String(f.hint || '').trim() ? [{ text: f.hint, delaySec: 0 }] : []
+  };
+}
+function phase_(st) { return st.phase || 'main'; }
+function current_(snap, st) {
+  var ph = phase_(st);
+  if (ph === 'main') return snap.puzzles[st.index];
+  if (ph === 'finale') return finalePuzzle_(snap);
+  if (ph === 'vault') return (snap.vault || [])[st.vi || 0];
+  return null;
+}
+function limitMs_(snap) { return (Number(snap.room.timeLimitMin) || settings_().playMinutes) * 60000; }
+function elapsedMs_(r) { return nowMs_() - r.st.startMs + (Number(r.st.penaltySec) || 0) * 1000; }
+// 還能作答：沒結束，或已逃脫但還在寶庫
+function active_(r) { return !r.result || (r.result === 'escaped' && phase_(r.st) === 'vault'); }
+function resetPuzzle_(r) {
+  r.st.gate = 0;
+  r.st.hints = 0;
+  r.st.cooldownUntil = 0;
+  r.st.puzzleStart = nowMs_();
+}
+function escape_(r, snap) {
+  r.result = 'escaped';
+  r.ended = nowStr_();
+  r.st.escapeSec = Math.round(elapsedMs_(r) / 1000);
+  var cur = current_(snap, r.st);
+  logEvent_(r, cur ? cur.id : '', 'end', 'escaped', r.st.escapeSec);
+  if ((snap.vault || []).length && elapsedMs_(r) < limitMs_(snap)) {
+    r.st.phase = 'vault';
+    r.st.vi = 0;
+    resetPuzzle_(r);
+  } else {
+    r.st.phase = 'done';
+  }
+}
+/** 目前這關過了（解開或跳過）：往下一關走。回傳拿到的碎片（沒有就是 null） */
+function advance_(r, snap, skipped) {
+  var ph = phase_(r.st);
+  var fragment = null;
+  if (ph === 'main') {
+    if (finaleOn_(snap)) {
+      fragment = String((snap.room.fragments || [])[r.st.index] || '').trim();
+      r.st.fragments = (r.st.fragments || []).concat([fragment]);
+    }
+    if (r.st.index >= snap.puzzles.length - 1) {
+      if (finaleOn_(snap)) { r.st.phase = 'finale'; resetPuzzle_(r); }
+      else escape_(r, snap);
+    } else {
+      r.st.index++;
+      resetPuzzle_(r);
+    }
+  } else if (ph === 'finale') {
+    escape_(r, snap);
+  } else if (ph === 'vault') {
+    if (!skipped) r.st.vaultSolved = (r.st.vaultSolved || 0) + 1;
+    r.st.vi = (r.st.vi || 0) + 1;
+    resetPuzzle_(r);
+    if (r.st.vi >= (snap.vault || []).length) {
+      r.st.phase = 'done';
+      logEvent_(r, '', 'vault-end', 'complete', Math.round(elapsedMs_(r) / 1000));
+    }
+  }
+  return fragment;
 }
 function mediaPage_(pg) {
   pg = pg || {};
@@ -806,7 +921,8 @@ function startPlay_(room, version, team, test) {
   var snap = loadSnapshot_(version);
   var play = {
     id: newId_('g'), roomId: room.id, team: team, test: !!test, started: '', ended: '', result: '',
-    st: { snap: version, index: 0, gate: 0, puzzleStart: 0, startMs: 0, hints: 0, cooldownUntil: 0, wrong: 0 }
+    st: { snap: version, index: 0, gate: 0, puzzleStart: 0, startMs: 0, hints: 0, cooldownUntil: 0, wrong: 0,
+          phase: 'main', fragments: [], skips: 0, penaltySec: 0, vi: 0, vaultSolved: 0, escapeSec: null }
   };
   withLock_(function () {
     play.state = JSON.stringify(play.st);
@@ -843,37 +959,53 @@ function playState(playId, havePuzzleId) {
 }
 
 function checkTimeout_(r) {
-  if (r.result || !r.st.startMs) return;
+  if (!r.st.startMs) return;
   var snap = loadSnapshot_(r.st.snap);
-  var limit = (Number(snap.room.timeLimitMin) || settings_().playMinutes) * 60000;
-  if (nowMs_() - r.st.startMs > limit) {
+  if (elapsedMs_(r) <= limitMs_(snap)) return;
+  if (!r.result) {
     r.result = 'timeout';
     r.ended = nowStr_();
     savePlay_(r);
-    var p = snap.puzzles[r.st.index];
+    var p = current_(snap, r.st);
     logEvent_(r, p ? p.id : '', 'end', 'timeout', Math.round((nowMs_() - r.st.puzzleStart) / 1000));
+  } else if (active_(r)) {
+    r.st.phase = 'done';
+    savePlay_(r);
+    logEvent_(r, '', 'vault-end', 'timeout', Math.round(elapsedMs_(r) / 1000));
   }
 }
 
 function stateOf_(r, havePuzzleId) {
   var snap = loadSnapshot_(r.st.snap);
-  var limitSec = (Number(snap.room.timeLimitMin) || settings_().playMinutes) * 60;
-  var elapsed = r.st.startMs ? Math.floor((nowMs_() - r.st.startMs) / 1000) : 0;
+  var limitSec = limitMs_(snap) / 1000;
+  var elapsed = r.st.startMs ? Math.floor(elapsedMs_(r) / 1000) : 0;
+  var vault = snap.vault || [];
+  var ph = phase_(r.st);
   var out = {
-    playId: r.id, test: r.test === true || r.test === '是', result: r.result || '',
+    playId: r.id, test: r.test === true || r.test === '是', result: r.result || '', over: !active_(r),
     total: snap.puzzles.length, index: r.st.index, remainingSec: Math.max(0, limitSec - elapsed),
-    elapsedSec: elapsed
+    elapsedSec: elapsed, phase: ph,
+    finale: finaleOn_(snap), fragments: r.st.fragments || [],
+    skipMin: Number(snap.room.skipMin) || 0, skips: r.st.skips || 0, penaltySec: r.st.penaltySec || 0,
+    vaultTotal: vault.length, vaultIndex: r.st.vi || 0, vaultSolved: r.st.vaultSolved || 0,
+    escapeSec: r.st.escapeSec === undefined ? null : r.st.escapeSec
   };
-  if (r.result) {
+  if (out.over) {
+    if (out.escapeSec !== null) out.elapsedSec = out.escapeSec;
     var pg = r.result === 'escaped' ? snap.room.success : snap.room.fail;
     out.ending = mediaPage_(pg);
-    out.rateList = snap.puzzles.slice(0, Math.min(snap.puzzles.length, r.st.index + 1)).map(function (p, i) {
-      return { id: p.id, no: i + 1, title: p.title };
-    });
-    if (r.result === 'escaped') out.rateList = snap.puzzles.map(function (p, i) { return { id: p.id, no: i + 1, title: p.title }; });
+    var item = function (p, i) { return { id: p.id, no: i + 1, title: p.title }; };
+    out.rateList = r.result === 'escaped'
+      ? snap.puzzles.map(item)
+      : snap.puzzles.slice(0, Math.min(snap.puzzles.length, r.st.index + 1)).map(item);
+    if (r.result === 'escaped' && ph === 'done') {
+      vault.slice(0, Math.min(vault.length, (r.st.vi || 0) + 1)).forEach(function (p, i) {
+        out.rateList.push({ id: p.id, no: i + 1, title: p.title, label: '寶庫 ' + (i + 1) });
+      });
+    }
     return out;
   }
-  var p = snap.puzzles[r.st.index];
+  var p = current_(snap, r.st);
   var gates = gates_(p);
   var since = Math.floor((nowMs_() - r.st.puzzleStart) / 1000);
   var visibleHints = (p.hints || []).filter(function (h) { return String(h.text || '').trim(); });
@@ -887,6 +1019,7 @@ function stateOf_(r, havePuzzleId) {
   out.nextHintInSec = r.st.hints < visibleHints.length
     ? Math.max(0, (Number(visibleHints[r.st.hints].delaySec) || 0) - since) : -1;
   out.cooldownSec = Math.max(0, Math.ceil((r.st.cooldownUntil - nowMs_()) / 1000));
+  out.canSkip = (ph === 'main' && out.skipMin > 0) || ph === 'vault';
   if (havePuzzleId !== p.id) out.blocks = renderBlocks_(p.blocks || []);
   return out;
 }
@@ -910,11 +1043,11 @@ function playAnswer(playId, answer) {
   return withLock_(function () {
     var r = findPlay_(playId);
     checkTimeout_(r);
-    if (r.result) return { state: stateOf_(r, '*') };
+    if (!active_(r)) return { state: stateOf_(r, '*') };
     if (!r.st.startMs) throw new Error('遊戲還沒開始');
-    if (nowMs_() < r.st.cooldownUntil) return { wait: true, state: stateOf_(r, r.st.index >= 0 ? currentPid_(r) : null) };
+    if (nowMs_() < r.st.cooldownUntil) return { wait: true, state: stateOf_(r, currentPid_(r)) };
     var snap = loadSnapshot_(r.st.snap);
-    var p = snap.puzzles[r.st.index];
+    var p = current_(snap, r.st);
     var gates = gates_(p);
     var g = gates[r.st.gate];
     var n = norm_(answer);
@@ -939,33 +1072,70 @@ function playAnswer(playId, answer) {
     }
     logEvent_(r, p.id, 'solve', '', since);
     res.solved = true;
-    if (r.st.index >= snap.puzzles.length - 1) {
-      r.result = 'escaped';
-      r.ended = nowStr_();
-      logEvent_(r, p.id, 'end', 'escaped', Math.round((nowMs_() - r.st.startMs) / 1000));
-    } else {
-      r.st.index++;
-      r.st.gate = 0;
-      r.st.hints = 0;
-      r.st.cooldownUntil = 0;
-      r.st.puzzleStart = nowMs_();
-    }
+    var wasEscaped = r.result === 'escaped';
+    res.fragment = advance_(r, snap, false);
+    res.escaped = !wasEscaped && r.result === 'escaped';
     savePlay_(r);
     res.state = stateOf_(r, null);
     return res;
   });
 }
 function currentPid_(r) {
-  try { return loadSnapshot_(r.st.snap).puzzles[r.st.index].id; } catch (e) { return null; }
+  try { var p = current_(loadSnapshot_(r.st.snap), r.st); return p ? p.id : null; } catch (e) { return null; }
+}
+
+/** 跳過：主線扣時間（照樣拿碎片）；寶庫直接換下一題、不扣時間 */
+function playSkip(playId) {
+  return withLock_(function () {
+    var r = findPlay_(playId);
+    checkTimeout_(r);
+    if (!active_(r)) return { state: stateOf_(r, '*') };
+    if (!r.st.startMs) throw new Error('遊戲還沒開始');
+    var snap = loadSnapshot_(r.st.snap);
+    var ph = phase_(r.st);
+    var p = current_(snap, r.st);
+    var since = Math.round((nowMs_() - r.st.puzzleStart) / 1000);
+    var res = { skipped: true };
+    if (ph === 'main') {
+      var m = Number(snap.room.skipMin) || 0;
+      if (!(m > 0)) throw new Error('這個密室不能跳過');
+      r.st.penaltySec = (Number(r.st.penaltySec) || 0) + m * 60;
+      r.st.skips = (r.st.skips || 0) + 1;
+      res.penaltyMin = m;
+    } else if (ph !== 'vault') {
+      throw new Error('這一關不能跳過');
+    }
+    logEvent_(r, p.id, 'skip', ph, since);
+    var wasEscaped = r.result === 'escaped';
+    res.fragment = advance_(r, snap, true);
+    res.escaped = !wasEscaped && r.result === 'escaped';
+    savePlay_(r);
+    checkTimeout_(r); // 扣時後可能剛好時間到
+    res.state = stateOf_(r, null);
+    return res;
+  });
+}
+
+/** 寶庫裡想停就停：結束遊戲、進入評分 */
+function playFinish(playId) {
+  return withLock_(function () {
+    var r = findPlay_(playId);
+    if (r.result === 'escaped' && phase_(r.st) === 'vault') {
+      r.st.phase = 'done';
+      logEvent_(r, '', 'vault-end', 'stop', Math.round(elapsedMs_(r) / 1000));
+      savePlay_(r);
+    }
+    return { state: stateOf_(r, '*') };
+  });
 }
 
 function playHint(playId) {
   return withLock_(function () {
     var r = findPlay_(playId);
     checkTimeout_(r);
-    if (r.result) return { state: stateOf_(r, '*') };
+    if (!active_(r)) return { state: stateOf_(r, '*') };
     var snap = loadSnapshot_(r.st.snap);
-    var p = snap.puzzles[r.st.index];
+    var p = current_(snap, r.st);
     var hints = (p.hints || []).filter(function (h) { return String(h.text || '').trim(); });
     var since = Math.floor((nowMs_() - r.st.puzzleStart) / 1000);
     if (r.st.hints < hints.length && since >= (Number(hints[r.st.hints].delaySec) || 0)) {
@@ -1117,7 +1287,8 @@ function adminCreateTeacherRoom(code, title) {
     return stripRow_(room);
   });
 }
-function adminSetRoomPuzzles(code, roomId, ids) {
+/** extra（選用）：{ fragments: 與 ids 同順序的碎片, vaultIds: 寶庫題目 } */
+function adminSetRoomPuzzles(code, roomId, ids, extra) {
   var a = account_(code);
   needRole_(a, ['admin']);
   return withLock_(function () {
@@ -1125,7 +1296,20 @@ function adminSetRoomPuzzles(code, roomId, ids) {
     if (!room || room.kind !== 'teacher') throw new Error('只有示範密室可以從題庫組裝');
     var bank = {};
     allDocs_('Puzzles').forEach(function (p) { if (p.roomId === BANK && !p.deleted) bank[p.id] = 1; });
-    room.puzzleIds = (ids || []).filter(function (id) { return bank[id]; });
+    var frags = (extra && extra.fragments) || [];
+    var kept = [];
+    room.fragments = [];
+    (ids || []).forEach(function (id, i) {
+      if (!bank[id] || kept.indexOf(id) >= 0) return;
+      kept.push(id);
+      room.fragments.push(String(frags[i] === undefined || frags[i] === null ? '' : frags[i]).trim());
+    });
+    room.puzzleIds = kept;
+    if (extra && extra.vaultIds) {
+      room.vaultIds = extra.vaultIds.filter(function (id, i, arr) {
+        return bank[id] && kept.indexOf(id) < 0 && arr.indexOf(id) === i;
+      });
+    }
     putDoc_('Rooms', room);
     return stripRow_(room);
   });
@@ -1144,6 +1328,7 @@ function adminGetRoom(code, roomId) {
     room: stripRow_(room),
     members: membersOfRoom_(room),
     puzzles: ps.map(function (p) { var x = stripRow_(p); x.checks = checkPuzzle_(p, s, kind, true); return x; }),
+    vault: roomVault_(room).map(function (p) { var x = stripRow_(p); x.checks = checkPuzzle_(p, s, kind, true); return x; }),
     roomChecks: checkRoom_(room, ps, s, membersOfRoom_(room), true)
   };
 }
@@ -1232,13 +1417,18 @@ function adminLive(code) {
     return r.started && new Date(r.started).getTime() > since;
   }).map(function (r) {
     var st = JSON.parse(r.state || '{}');
-    var total = 0;
-    try { total = loadSnapshot_(st.snap).puzzles.length; } catch (e) { }
+    var total = 0, vaultTotal = 0;
+    try { var sn = loadSnapshot_(st.snap); total = sn.puzzles.length; vaultTotal = (sn.vault || []).length; } catch (e) { }
+    var running = !r.result || (r.result === 'escaped' && st.phase === 'vault');
+    var penalty = (Number(st.penaltySec) || 0) * 1000;
     return {
       team: r.team, room: rooms[r.roomId] || r.roomId, test: r.test === '是' || r.test === true,
       index: st.index, total: total, result: r.result || '', started: r.started,
-      elapsedSec: st.startMs ? Math.floor(((r.ended ? new Date(r.ended).getTime() : nowMs_()) - st.startMs) / 1000) : 0,
-      hints: st.hints, wrong: st.wrong || 0
+      elapsedSec: !st.startMs ? 0 : (st.escapeSec !== undefined && st.escapeSec !== null && !running) ? st.escapeSec
+        : Math.floor(((running ? nowMs_() : new Date(r.ended).getTime()) - st.startMs + penalty) / 1000),
+      hints: st.hints, wrong: st.wrong || 0,
+      phase: st.phase || 'main', skips: st.skips || 0, escapeSec: st.escapeSec === undefined ? null : st.escapeSec,
+      vaultIndex: st.vi || 0, vaultSolved: st.vaultSolved || 0, vaultTotal: vaultTotal
     };
   }).reverse();
 }
@@ -1254,8 +1444,12 @@ function adminStats(code, roomId) {
   plays.forEach(function (p) { playIds[p.id] = 1; });
   var events = readAll_('Events').filter(function (e) { return playIds[e.playId]; });
   var ratings = readAll_('Ratings').filter(function (e) { return playIds[e.playId]; });
-  var latest = room.publishedVersion ? loadSnapshot_(room.publishedVersion).puzzles : roomPuzzles_(room);
-  var per = latest.map(function (p, i) {
+  var latestSnap = room.publishedVersion ? loadSnapshot_(room.publishedVersion) : null;
+  var latest = latestSnap ? latestSnap.puzzles : roomPuzzles_(room);
+  var vaultList = latestSnap ? (latestSnap.vault || []) : roomVault_(room);
+  var per = latest.concat(vaultList).map(function (p, idx) {
+    var inVault = idx >= latest.length;
+    var i = inVault ? idx - latest.length : idx;
     var ev = events.filter(function (e) { return e.puzzleId === p.id; });
     var reached = {};
     ev.forEach(function (e) { reached[e.playId] = 1; });
@@ -1270,17 +1464,21 @@ function adminStats(code, roomId) {
     var rs = ratings.filter(function (x) { return x.puzzleId === p.id && x.rating; }).map(function (x) { return Number(x.rating); });
     var avg = function (arr) { return arr.length ? Math.round(arr.reduce(function (t, v) { return t + v; }, 0) / arr.length * 10) / 10 : null; };
     return {
-      no: i + 1, id: p.id, title: p.title, author: p.author, estMinutes: Number(p.estMinutes) || 0,
+      no: i + 1, vault: inVault, id: p.id, title: p.title, author: p.author, estMinutes: Number(p.estMinutes) || 0,
       reached: Object.keys(reached).length, solved: solves.length,
       avgSolveMin: solves.length ? Math.round(avg(solves.map(function (e) { return Number(e.elapsed) || 0; })) / 6) / 10 : null,
       hintsUsed: hints.length, wrongCount: wrong.length, topWrong: topWrong,
-      gatesPassed: gateEv.length,
+      gatesPassed: gateEv.length, skipped: ev.filter(function (e) { return e.type === 'skip'; }).length,
       avgRating: avg(rs), ratingCount: rs.length
     };
   });
   var escaped = plays.filter(function (p) { return p.result === 'escaped'; });
+  var stOf = function (p) { try { return JSON.parse(p.state || '{}'); } catch (e) { return {}; } };
+  var escSecs = escaped.map(function (p) { return Number(stOf(p).escapeSec); }).filter(function (x) { return x > 0; });
   return {
     title: room.title, plays: plays.length, escaped: escaped.length,
+    avgEscapeMin: escSecs.length ? Math.round(escSecs.reduce(function (t, v) { return t + v; }, 0) / escSecs.length / 6) / 10 : null,
+    vaultTotal: vaultList.length,
     perPuzzle: per,
     comments: ratings.filter(function (x) { return x.comment; }).map(function (x) { return x.comment; })
   };

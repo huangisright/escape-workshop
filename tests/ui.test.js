@@ -203,7 +203,7 @@ test('一般密室（沒開選用玩法）畫面跟原本一樣，手機寬度�
         answer: 'ONE', hints: [{ text: '提示', delaySec: 0 }], themeLink: 'x', scienceBasis: 'y', reskinCheck: 'z' });
       const room = GAS('adminCreateTeacherRoom')(A, '一般密室');
       GAS('adminSetRoomPuzzles')(A, room.id, [p.id]);
-      GAS('saveRoom')(A, { id: room.id, rev: 1, cover: { text: '封面', imageId: '' }, story: [{ text: '說明', imageId: '' }],
+      GAS('saveRoom')(A, { id: room.id, rev: 0, cover: { text: '封面', imageId: '' }, story: [{ text: '說明', imageId: '' }],
         success: { text: '成功', imageId: '' }, fail: { text: '失敗', imageId: '' } });
       return GAS('adminRoomAction')(A, room.id, 'publish').playCode;
     });
@@ -211,6 +211,7 @@ test('一般密室（沒開選用玩法）畫面跟原本一樣，手機寬度�
     await click(page, '[data-act=toPlay]');
     await page.fill('#team', '一隊');
     await click(page, '[data-act=playStart]');
+    await page.waitForSelector('[data-act=introNext]');
     while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
     await page.waitForSelector('#barIdx');
     assert.equal(await page.locator('.frags').count(), 0, '沒有線索簿');
@@ -221,6 +222,98 @@ test('一般密室（沒開選用玩法）畫面跟原本一樣，手機寬度�
     await click(page, '#goBtn');
     await page.waitForSelector('[data-act=sendRate]');
     assert.match(await page.textContent('.play'), /用時 0:\d\d/);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('重新整理後接著玩；重置回到輸入隊名；評分後下一隊開始', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const { page, errors } = await openPage(browser);
+    const playCode = await page.evaluate(() => {
+      GAS('setup')();
+      const A = GAS('showAdminCode')();
+      GAS('adminSaveSettings')(A, { resetPin: '1234' });
+      const t = GAS('adminCreateTeachers')(A, ['陳老師'])[0];
+      const ids = ['ONE', 'TWO'].map((ans, i) => {
+        const p = GAS('newPuzzle')(t.code);
+        GAS('savePuzzle')(t.code, { id: p.id, rev: 0, title: '第' + (i + 1) + '題', kind: 'digital', estMinutes: 5,
+          steps: [{ get: 'a', act: 'b', result: 'c', checkpoint: '' }], blocks: [{ type: 'text', text: '題目' + (i + 1) }],
+          answer: ans, hints: [{ text: '提示', delaySec: 0 }], themeLink: 'x', scienceBasis: 'y', reskinCheck: 'z' });
+        return p.id;
+      });
+      const room = GAS('adminCreateTeacherRoom')(A, '重置測試');
+      GAS('adminSetRoomPuzzles')(A, room.id, ids);
+      GAS('saveRoom')(A, { id: room.id, rev: 0, cover: { text: '封面', imageId: '' }, story: [{ text: '說明', imageId: '' }],
+        success: { text: '成功', imageId: '' }, fail: { text: '失敗', imageId: '' } });
+      return GAS('adminRoomAction')(A, room.id, 'publish').playCode;
+    });
+    // 模擬重新整理：清掉畫面與記憶體中的遊戲狀態，重新執行開機流程（資料庫還在、localStorage 還在）
+    const reload = () => page.evaluate(() => { clearTimers(); S.play = null; S.me = null; S.code = null; app.innerHTML = ''; boot(); });
+    const startTeam = async (name) => {
+      await page.fill('#team', name);
+      await click(page, '[data-act=playStart]');
+      await page.waitForSelector('[data-act=introNext]');
+    };
+
+    await page.fill('#pcode', playCode);
+    await click(page, '[data-act=toPlay]');
+    await startTeam('一隊');
+
+    // 封面頁就重新整理：回到封面，還沒開始計時
+    await reload();
+    await page.waitForSelector('[data-act=introNext]');
+    assert.match(await page.textContent('.play'), /封面/);
+    while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
+    await page.waitForSelector('#barIdx');
+    await page.fill('#ans', 'one');
+    await click(page, '#goBtn');
+    await page.waitForFunction(() => document.getElementById('barIdx') && document.getElementById('barIdx').textContent === '第 2 / 2 題');
+
+    // 玩到一半重新整理：接著第 2 題
+    await reload();
+    await page.waitForSelector('#barIdx');
+    assert.equal(await page.textContent('#barIdx'), '第 2 / 2 題');
+    assert.match(await page.textContent('#blocks'), /題目2/);
+    await shot(page, '10-resumed');
+
+    // 重置：要密碼，錯的擋下
+    await click(page, '[data-act=resetPlay]');
+    await page.fill('#resetPin', '0000');
+    await click(page, '#resetOk');
+    await page.waitForFunction(() => /重置密碼不對/.test(document.getElementById('resetMsg').textContent));
+    await page.fill('#resetPin', '1234');
+    await click(page, '#resetOk');
+    await page.waitForSelector('#team');
+    assert.match(await page.textContent('.play'), new RegExp(playCode));
+    assert.equal(await page.evaluate(() => localStorage.getItem('erPlay')), null);
+
+    // 重置後重新整理不會回到舊遊戲
+    await reload();
+    await page.waitForSelector('#pcode');
+
+    // 二隊玩完、評分、下一隊開始
+    await page.fill('#pcode', playCode);
+    await click(page, '[data-act=toPlay]');
+    await startTeam('二隊');
+    while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
+    await page.waitForSelector('#barIdx');
+    await page.fill('#ans', 'ONE');
+    await click(page, '#goBtn');
+    await page.waitForFunction(() => document.getElementById('barIdx') && document.getElementById('barIdx').textContent === '第 2 / 2 題');
+    await page.fill('#ans', 'TWO');
+    await click(page, '#goBtn');
+    await page.waitForSelector('[data-act=sendRate]');
+    await reload();
+    await page.waitForSelector('[data-act=sendRate]', { timeout: 5000 });
+    await click(page, '[data-act=sendRate]');
+    await click(page, '[data-act=nextTeam]');
+    await page.waitForSelector('#team');
+
+    const live = await page.evaluate(() => GAS('adminLive')(GAS('showAdminCode')()).map((r) => r.team + ':' + r.result).sort());
+    assert.deepEqual(live, ['一隊:reset', '二隊:escaped']);
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

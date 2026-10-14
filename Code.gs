@@ -32,7 +32,8 @@ var DEFAULT_SETTINGS = {
   wrongCooldownSec: 10,     // 答錯後要等幾秒才能再答
   defaultHintDelaySec: 60,  // 新增提示時的預設秒數
   themeLabel: '主題連結（SDGs 14 永續海洋）',
-  requireDigitalAndPhysical: true
+  requireDigitalAndPhysical: true,
+  resetPin: ''              // 玩家畫面按「重置」要輸入的密碼，空白 = 不用密碼
 };
 
 var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -931,7 +932,49 @@ function startPlay_(room, version, team, test) {
   var intro = introOf_(snap);
   intro.playId = play.id;
   intro.test = !!test;
+  intro.playCode = test ? '' : (room.playCode || '');
+  intro.pinRequired = !!String(settings_().resetPin || '').trim();
   return intro;
+}
+
+/** 重新整理或重開平板後接著玩：回傳封面說明，以及開始了沒、目前進度 */
+function playResume(playId) {
+  return withLock_(function () {
+    var r = findPlay_(playId);
+    if (r.result === 'reset') throw new Error('這場遊戲已經重置了');
+    checkTimeout_(r);
+    var snap = loadSnapshot_(r.st.snap);
+    var intro = introOf_(snap);
+    var room = getDoc_('Rooms', r.roomId);
+    intro.playId = r.id;
+    intro.test = r.test === true || r.test === '是';
+    intro.playCode = intro.test ? '' : ((room && room.playCode) || '');
+    intro.pinRequired = !!String(settings_().resetPin || '').trim();
+    intro.team = r.team;
+    return { intro: intro, begun: !!r.st.startMs, state: r.st.startMs ? stateOf_(r, null) : null };
+  });
+}
+
+/** 重置：放棄這場遊戲（不計入數據），讓同一台平板重新開始 */
+function playReset(playId, pin) {
+  var need = String(settings_().resetPin || '').trim();
+  if (need && String(pin || '').trim() !== need) throw new Error('重置密碼不對');
+  return withLock_(function () {
+    var r = findPlay_(playId);
+    if (r.result === 'escaped' && phase_(r.st) === 'vault') {
+      // 已經逃脫、還在寶庫：保留逃脫成績，只結束寶庫
+      r.st.phase = 'done';
+      savePlay_(r);
+      logEvent_(r, '', 'vault-end', 'reset', Math.round(elapsedMs_(r) / 1000));
+    } else if (!r.result) {
+      r.result = 'reset';
+      r.ended = nowStr_();
+      savePlay_(r);
+      logEvent_(r, '', 'reset', '', r.st.startMs ? Math.round(elapsedMs_(r) / 1000) : 0);
+    }
+    // 已經結束（逃脫、時間到、已重置）的場次不改，數據照常保留
+    return true;
+  });
 }
 
 function playBegin(playId) {
@@ -1439,7 +1482,7 @@ function adminStats(code, roomId) {
   needRole_(a, ['admin']);
   var room = getDoc_('Rooms', roomId);
   if (!room) throw new Error('找不到密室');
-  var plays = readAll_('Plays').filter(function (r) { return r.roomId === roomId && !(r.test === '是' || r.test === true) && r.started; });
+  var plays = readAll_('Plays').filter(function (r) { return r.roomId === roomId && !(r.test === '是' || r.test === true) && r.started && r.result !== 'reset'; });
   var playIds = {};
   plays.forEach(function (p) { playIds[p.id] = 1; });
   var events = readAll_('Events').filter(function (e) { return playIds[e.playId]; });

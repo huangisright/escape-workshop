@@ -114,6 +114,7 @@ body.playing{background:#12161b;color:#eef0f2}
 .play textarea{background:#0e1216;color:#fff;border:1px solid #3a4552}
 .flash{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0b0e12e6;z-index:60;font-size:40px;font-weight:800;color:#8fe0a6}
 .testtag{background:#f3c969;color:#222;border-radius:6px;padding:1px 8px;font-size:13px}
+.resetbtn{font-size:14px;padding:6px 12px;border-radius:10px;background:transparent;color:#9aa4ae;border:1px solid #3a4552;cursor:pointer}
 .frags{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px;color:#aab3bd;font-size:15px}
 .frag{min-width:40px;height:44px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;background:#f3c969;color:#1b1b1b;font-weight:800;font-size:20px}
 .frag.empty{background:#2b343f;color:#6f7a86}
@@ -364,9 +365,28 @@ function prepareHtml(file) {
 /* ============================================================
    啟動與登入
    ============================================================ */
+// 這台平板正在玩的遊戲（重新整理後接著玩）；試玩不記
+function savedPlay() {
+  try { var v = JSON.parse(store('erPlay') || 'null'); return v && v.id ? v : null; } catch (e) { return null; }
+}
+function forgetPlay() { store('erPlay', null); }
+function resumePlay(saved, params) {
+  app.innerHTML = '<div class="login"><p class="muted">接著剛才的遊戲…</p></div>';
+  api('playResume', saved.id).then(function (r) {
+    enterPlay(r.intro, true);
+    if (!r.begun) return showIntroPage();
+    applyPlayState(r.state);
+  }).catch(function () {
+    forgetPlay();
+    if (params.p) return showPlayEntry(String(params.p).toUpperCase());
+    showLogin();
+  });
+}
 function boot() {
   var go = function (params) {
     params = params || {};
+    var saved = savedPlay();
+    if (saved && (!params.p || String(params.p).toUpperCase() === saved.code)) return resumePlay(saved, params);
     if (params.p) return showPlayEntry(String(params.p).toUpperCase());
     var c = params.c || store('erCode');
     if (c) return doLogin(c, true);
@@ -829,7 +849,8 @@ var SETTING_FIELDS = [
   ['maxPuzzleMinutes', '每題預估時間上限（分鐘，超過亮黃燈）', 'number'], ['maxHints', '每題提示層數上限', 'number'],
   ['minPuzzlesPerMember', '每人至少幾題', 'number'], ['maxPuzzlesPerMember', '每人最多幾題', 'number'],
   ['answerMaxLen', '答案字數上限（0 = 不限）', 'number'], ['wrongCooldownSec', '答錯後等幾秒才能再答', 'number'],
-  ['defaultHintDelaySec', '新增提示時預設幾秒後可看', 'number'], ['requireDigitalAndPhysical', '每組數位題、實體題至少各一題', 'bool']
+  ['defaultHintDelaySec', '新增提示時預設幾秒後可看', 'number'], ['resetPin', '玩家畫面按「重置」要輸入的密碼（空白 = 不用密碼）', 'text'],
+  ['requireDigitalAndPhysical', '每組數位題、實體題至少各一題', 'bool']
 ];
 function adminSettingsHtml(s) {
   return '<div class="card"><h3>營隊規則</h3><p class="help">規則超標只會亮黃燈提醒，不會擋住學生。</p>' + SETTING_FIELDS.map(function (f) {
@@ -845,7 +866,7 @@ function loadLive() {
     b.innerHTML = '<div class="card"><h3>最近三小時的遊戲 <span class="muted" style="font-size:13px">每 10 秒更新</span></h3>' + (rows.length ? '<table><tr><th>隊伍</th><th>密室</th><th>進度</th><th>時間</th><th>提示</th><th>答錯</th><th>跳過</th><th>狀態</th></tr>' + rows.map(function (r) {
       var where = r.phase === 'finale' ? '終章' : r.phase === 'vault' ? '寶庫 ' + (r.vaultIndex + 1) + ' / ' + r.vaultTotal : (r.result ? r.total : r.index + 1) + ' / ' + r.total;
       return '<tr><td>' + esc(r.team) + (r.test ? ' <span class="chip">試玩</span>' : '') + '</td><td>' + esc(r.room) + '</td><td>' + where + '</td><td>' + fmtSec(r.elapsedSec) + '</td><td>' + (r.hints || 0) + '</td><td>' + r.wrong + '</td><td>' + (r.skips || 0) + '</td><td>' +
-        (r.result === 'escaped' ? '<span class="chip approved">逃脫成功' + (r.escapeSec !== null && r.escapeSec !== undefined ? ' ' + fmtSec(r.escapeSec) : '') + '</span>' + (r.vaultTotal ? ' <span class="chip">寶物 ' + r.vaultSolved + '</span>' : '') : r.result === 'timeout' ? '<span class="chip submitted">時間到</span>' : '<span class="chip draft">進行中</span>') + '</td></tr>';
+        (r.result === 'escaped' ? '<span class="chip approved">逃脫成功' + (r.escapeSec !== null && r.escapeSec !== undefined ? ' ' + fmtSec(r.escapeSec) : '') + '</span>' + (r.vaultTotal ? ' <span class="chip">寶物 ' + r.vaultSolved + '</span>' : '') : r.result === 'timeout' ? '<span class="chip submitted">時間到</span>' : r.result === 'reset' ? '<span class="chip">已重置</span>' : '<span class="chip draft">進行中</span>') + '</td></tr>';
     }).join('') + '</table>' : '<p class="muted">目前沒有遊戲。</p>') + '</div>';
   }).catch(function () { });
 }
@@ -985,11 +1006,32 @@ function showPlayEntry(playCode) {
     '<input class="pin" id="team" placeholder="輸入隊名" maxlength="30" autocomplete="off"><button class="pbtn" data-act="playStart" data-code="' + esc(playCode) + '">進入密室</button><div class="pmsg bad" id="pmsg"></div></div>' +
     '<p class="center"><a href="#" data-act="toLogin" style="color:#9aa4ae">回到首頁</a></p></div>';
 }
-function enterPlay(intro) {
-  S.play = { id: intro.playId, intro: intro, test: intro.test, page: 0, pid: null, blocks: null, deadline: 0, hintAt: 0, coolAt: 0, rate: {} };
+function enterPlay(intro, resumed) {
+  S.play = { id: intro.playId, intro: intro, test: intro.test, code: intro.playCode || '', pinRequired: !!intro.pinRequired,
+    page: 0, pid: null, blocks: null, deadline: 0, hintAt: 0, coolAt: 0, rate: {} };
   document.body.className = 'playing';
   S.view = 'play';
-  showIntroPage();
+  if (!intro.test) store('erPlay', JSON.stringify({ id: intro.playId, code: intro.playCode || '' }));
+  if (!resumed) showIntroPage();
+}
+var RESET_BTN = '<button class="resetbtn" data-act="resetPlay">重置</button>';
+function askReset() {
+  var P = S.play;
+  var d = modal('<h3>重置這場遊戲？</h3><p>這一隊的進度會清掉、不列入數據，平板回到輸入隊名的畫面。已經逃脫的隊伍會保留成績。</p>' +
+    (P.pinRequired ? '<label class="f">重置密碼（請找關主）</label><input type="text" id="resetPin" autocomplete="off">' : '') +
+    '<p class="pmsg bad" id="resetMsg" style="color:var(--err)"></p><div class="btns"><button class="btn danger" id="resetOk">重置</button><button class="btn ghost" data-act="closeModal">取消</button></div>');
+  d.querySelector('#resetOk').onclick = function () {
+    var pin = P.pinRequired ? d.querySelector('#resetPin').value : '';
+    api('playReset', P.id, pin).then(function () {
+      closeModal();
+      clearTimers();
+      forgetPlay();
+      if (P.test && S.code) return ACTIONS.backFromTest();
+      S.play = null;
+      if (P.code) return showPlayEntry(P.code);
+      showLogin();
+    }).catch(function (e) { d.querySelector('#resetMsg').textContent = e.message; });
+  };
 }
 function introPages() {
   var it = S.play.intro, pages = [];
@@ -1000,7 +1042,7 @@ function showIntroPage() {
   var pages = introPages(), k = S.play.page, it = S.play.intro;
   if (!pages.length || k >= pages.length) return beginPlay();
   var pg = pages[k];
-  app.innerHTML = '<div class="play"><div class="bar"><b>' + esc(it.title) + '</b>' + (S.play.test ? ' <span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span>' + it.total + ' 題 · ' + Math.round(it.timeLimitSec / 60) + ' 分鐘</span></div>' +
+  app.innerHTML = '<div class="play"><div class="bar"><b>' + esc(it.title) + '</b>' + (S.play.test ? ' <span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span>' + it.total + ' 題 · ' + Math.round(it.timeLimitSec / 60) + ' 分鐘</span>' + RESET_BTN + '</div>' +
     '<div class="pcard">' + (k === 0 ? '<h2>' + esc(it.title) + '</h2>' : '') + (pg.image ? '<img src="' + pg.image + '">' : '') + '<div class="txt">' + esc(pg.text) + '</div>' +
     '<button class="pbtn" data-act="introNext">' + (k === pages.length - 1 ? '開始挑戰（開始計時）' : '下一頁') + '</button></div></div>';
 }
@@ -1040,7 +1082,7 @@ function renderPlay(msg, good) {
   if (P.pid !== st.puzzleId) { api('playState', P.id, '').then(applyPlayState).catch(fail); return; }
   // 同一題只畫一次題目內容，避免 HTML 小遊戲被重新載入
   if (P.renderedPid !== st.puzzleId || !document.getElementById('blocks')) {
-    app.innerHTML = '<div class="play"><div class="bar"><span id="barIdx"></span>' + (P.test ? '<span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span class="timer" id="tm">' + fmtSec(st.remainingSec) + '</span></div>' +
+    app.innerHTML = '<div class="play"><div class="bar"><span id="barIdx"></span>' + (P.test ? '<span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span class="timer" id="tm">' + fmtSec(st.remainingSec) + '</span>' + RESET_BTN + '</div>' +
       '<div class="pcard"><h2>' + esc(st.title) + '</h2><div id="blocks"></div></div><div class="pcard" id="panel"></div></div>';
     renderPlayBlocks(document.getElementById('blocks'), P.blocks, false);
     P.renderedPid = st.puzzleId;
@@ -1177,8 +1219,10 @@ function finishRate() {
   var P = S.play;
   var list = Object.keys(P.rate).map(function (k) { return { id: k, rating: P.rate[k] }; });
   api('playRate', P.id, list, document.getElementById('liked').value, document.getElementById('stuck').value).then(function () {
+    forgetPlay();
     app.innerHTML = '<div class="play"><div class="pcard center"><h2>謝謝你的回饋！</h2>' +
-      (P.test && S.code ? '<button class="pbtn" data-act="backFromTest">回到編輯</button>' : '<p>可以把平板交給下一隊了。</p><button class="pbtn ghost" data-act="toLogin">回到首頁</button>') + '</div></div>';
+      (P.test && S.code ? '<button class="pbtn" data-act="backFromTest">回到編輯</button>' : '<p>可以把平板交給下一隊了。</p>' +
+        (P.code ? '<button class="pbtn" data-act="nextTeam">下一隊開始</button> ' : '') + '<button class="pbtn ghost" data-act="toLogin">回到首頁</button>') + '</div></div>';
   }).catch(fail);
 }
 
@@ -1338,6 +1382,8 @@ var ACTIONS = {
     api('playStart', el.getAttribute('data-code'), team).then(enterPlay).catch(function (e) { el.disabled = false; document.getElementById('pmsg').textContent = e.message; });
   },
   introNext: function () { S.play.page++; showIntroPage(); },
+  resetPlay: function () { askReset(); },
+  nextTeam: function () { var c = S.play && S.play.code; forgetPlay(); S.play = null; c ? showPlayEntry(c) : showLogin(); },
   answer: function () { sendAnswer(); },
   hint: function () { askHint(); },
   skip: function () { askSkip(); },

@@ -33,7 +33,8 @@ var DEFAULT_SETTINGS = {
   defaultHintDelaySec: 60,  // 新增提示時的預設秒數
   themeLabel: '主題連結（SDGs 14 永續海洋）',
   requireDigitalAndPhysical: true,
-  resetPin: ''              // 玩家畫面按「重置」要輸入的密碼，空白 = 不用密碼
+  resetPin: '',             // 玩家畫面按「重置」要輸入的密碼，空白 = 不用密碼
+  appUrl: ''                // 網頁應用程式網址（…/exec）；空白 = 自動偵測
 };
 
 var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -258,8 +259,15 @@ function login(code) {
     roomId: a.roomId, settings: settings_(), appUrl: appUrl_()
   };
 }
+// QR code 與連結用的網址。新版編輯器有時會回傳程式庫網址（/macros/library/…），那種網址打不開，
+// 所以優先用管理者在「設定」填的網址，自動偵測到程式庫網址就當作沒有。
+function isWebAppUrl_(u) { return /^https:\/\/script\.google\.com\/(a\/[^\/]+\/)?macros\/s\/[^\/]+\/exec$/.test(u); }
 function appUrl_() {
-  try { return ScriptApp.getService().getUrl() || ''; } catch (e) { return ''; }
+  var set = String(settings_().appUrl || '').trim().replace(/\?.*$/, '');
+  if (isWebAppUrl_(set)) return set;
+  var u = '';
+  try { u = ScriptApp.getService().getUrl() || ''; } catch (e) { u = ''; }
+  return isWebAppUrl_(u) ? u : '';
 }
 
 /** 學生：讀取自己組的密室；老師：讀取題庫 */
@@ -1246,6 +1254,11 @@ function adminOverview(code) {
 function adminSaveSettings(code, data) {
   var a = account_(code);
   needRole_(a, ['admin']);
+  if (data.appUrl !== undefined) {
+    var u = String(data.appUrl || '').trim().replace(/\?.*$/, '');
+    if (u && !isWebAppUrl_(u)) throw new Error('網址要是「網頁應用程式」的網址，開頭 https://script.google.com/macros/s/、結尾 /exec');
+    data.appUrl = u;
+  }
   var s = settings_();
   Object.keys(DEFAULT_SETTINGS).forEach(function (k) {
     if (data[k] === undefined) return;

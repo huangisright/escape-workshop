@@ -829,9 +829,10 @@ function playExtrasText(r) {
 }
 function adminCodesHtml(d) {
   var url = d.appUrl || '';
+  var noUrl = url ? '' : '<div class="banner">還沒有平台網址，QR code 印不出來。請到「設定」貼上網頁應用程式的網址（結尾是 /exec）。</div>';
   var groups = d.codes.filter(function (c) { return c.role === 'group'; });
   var teachers = d.codes.filter(function (c) { return c.role === 'teacher'; });
-  var h = '<div class="card"><h3>分組（' + groups.length + ' 組）</h3><table><tr><th>組別</th><th>組員（用逗號或頓號分開）</th><th>代碼</th><th></th></tr>' +
+  var h = noUrl + '<div class="card"><h3>分組（' + groups.length + ' 組）</h3><table><tr><th>組別</th><th>組員（用逗號或頓號分開）</th><th>代碼</th><th></th></tr>' +
     groups.map(function (c) {
       return '<tr><td><input type="text" data-codename="' + c.code + '" value="' + esc(c.name) + '"></td><td><input type="text" data-codemem="' + c.code + '" value="' + esc(String(c.members || '').split(',').join('、')) + '"></td>' +
         '<td class="big" style="font-size:18px">' + esc(c.code) + '</td><td><button class="btn ghost sm" data-act="saveCode" data-code="' + c.code + '">儲存</button></td></tr>';
@@ -850,6 +851,7 @@ var SETTING_FIELDS = [
   ['minPuzzlesPerMember', '每人至少幾題', 'number'], ['maxPuzzlesPerMember', '每人最多幾題', 'number'],
   ['answerMaxLen', '答案字數上限（0 = 不限）', 'number'], ['wrongCooldownSec', '答錯後等幾秒才能再答', 'number'],
   ['defaultHintDelaySec', '新增提示時預設幾秒後可看', 'number'], ['resetPin', '玩家畫面按「重置」要輸入的密碼（空白 = 不用密碼）', 'text'],
+  ['appUrl', '平台網址（QR code 用）：部署 → 管理部署作業 →「網頁應用程式」的網址，結尾是 /exec', 'text'],
   ['requireDigitalAndPhysical', '每組數位題、實體題至少各一題', 'bool']
 ];
 function adminSettingsHtml(s) {
@@ -1424,7 +1426,7 @@ var ACTIONS = {
   playQr: function (el, id) {
     var r = S.admin.data.rooms.filter(function (x) { return x.id === id; })[0];
     var url = S.admin.data.appUrl ? S.admin.data.appUrl + '?p=' + r.playCode : '';
-    modal('<h3>' + esc(r.title) + '</h3><p>遊戲代碼</p><div class="big">' + esc(r.playCode) + '</div><div class="qr" data-qr="' + esc(url) + '" style="margin:10px 0"></div><p class="muted" style="word-break:break-all">' + esc(url) + '</p>');
+    modal('<h3>' + esc(r.title) + '</h3><p>遊戲代碼</p><div class="big">' + esc(r.playCode) + '</div><div class="qr" data-qr="' + esc(url) + '" style="margin:10px 0"></div><p class="muted" style="word-break:break-all">' + (url ? esc(url) : '還沒有平台網址，QR code 出不來。請到「設定」貼上網頁應用程式的網址（結尾是 /exec）；玩家也可以打開平台、輸入上面的遊戲代碼。') + '</p>');
     document.querySelectorAll('#modal [data-qr]').forEach(function (q) { if (url) { try { new QRCode(q, { text: url, width: 200, height: 200 }); } catch (e) { } } });
   },
   adminTest: function (el, id) { api('startTestPlay', S.code, id).then(function (intro) { S.testReturn = 'admin'; enterPlay(intro); }).catch(fail); },

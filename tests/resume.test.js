@@ -74,3 +74,18 @@ test('設了重置密碼就要輸入正確密碼', () => {
   assert.throws(() => env.gs.playReset(intro.playId, '9999'), /重置密碼不對/);
   assert.equal(env.gs.playReset(intro.playId, ' 1234 '), true);
 });
+
+test('平台網址：程式庫網址不拿來做 QR，設定裡填的網頁網址優先', () => {
+  const env = H.load();
+  const lib = 'https://script.google.com/macros/library/d/10PL2Kq8Jj7bW9eURe06CZaPXkDpDMlsOEJ4QFYKQRQpDtmETtkUAwyS2/2';
+  env.gs.ScriptApp.getService = () => ({ getUrl: () => lib });
+  assert.equal(env.plain(env.gs.adminOverview(env.admin)).appUrl, '', '程式庫網址當作沒有');
+  assert.throws(() => env.gs.adminSaveSettings(env.admin, { appUrl: lib }), /網頁應用程式/);
+  const web = 'https://script.google.com/macros/s/AKfycbwTEST/exec';
+  env.gs.adminSaveSettings(env.admin, { appUrl: ' ' + web + '?p=PABCD ' });
+  assert.equal(env.plain(env.gs.adminOverview(env.admin)).appUrl, web);
+  assert.equal(env.plain(env.gs.login(env.admin)).appUrl, web);
+  env.gs.adminSaveSettings(env.admin, { appUrl: '' });
+  env.gs.ScriptApp.getService = () => ({ getUrl: () => 'https://script.google.com/a/school.edu.tw/macros/s/AKfycbwX/exec' });
+  assert.equal(env.plain(env.gs.adminOverview(env.admin)).appUrl, 'https://script.google.com/a/school.edu.tw/macros/s/AKfycbwX/exec', '自動偵測到網頁網址照用');
+});

@@ -29,6 +29,17 @@
 
 ---
 
+## 二之一、給老師和學生的網址（GitHub Pages）
+
+**請發這個網址：https://huangisright.github.io/escape-workshop/**
+
+直接打開 Apps Script 的 `/exec` 網址時，如果瀏覽器同時登入了好幾個 Google 帳號，Google 會顯示「很抱歉，目前無法開啟這個檔案」。所以畫面另外放在 GitHub Pages（`docs/index.html`），資料照樣存在部署者的 Google 試算表與雲端硬碟，畫面透過 `doPost` API 存取，不帶任何 Google 登入資訊，登入幾個帳號都不影響。
+
+- `docs/index.html` 是由 `Index.html` 產生的，**不要直接改它**。改了 `Index.html` 之後執行 `node tools/build-pages.js`。
+- 換了 Apps Script 部署（網址變了）時，改 `pages.config.json` 的 `api`，再執行一次 `node tools/build-pages.js`。
+- 更新 Apps Script 程式時，照上面「二」用「管理部署作業 → 新版本」，網址不變，Pages 版就不用動。
+- API 只開放畫面會用到的函式（`Code.gs` 的 `API_FUNCTIONS`）；`setup`、`showAdminCode` 不能從網頁呼叫，管理者代碼只會出現在執行紀錄。
+
 ## 三、老師團隊出題（現在就能開始）
 
 1. 管理頁 →「代碼」→ 在「新增老師」一行輸入一位 → 建立老師代碼。
@@ -100,7 +111,7 @@
 `tests/` 裡用模擬的 Google 服務（試算表、雲端硬碟等）在電腦上跑 `Code.gs`，不用部署：
 
 ```
-node --test tests/backend.test.js tests/climate.test.js   # 後端
+node --test tests/backend.test.js tests/climate.test.js tests/api.test.js   # 後端
 node --test tests/ui.test.js                                        # 介面（需要 Playwright 與 Chromium）
 ```
 

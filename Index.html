@@ -149,12 +149,30 @@ function esc(s) {
 }
 function api(fn) {
   var args = Array.prototype.slice.call(arguments, 1);
+  if (window.ER_API) { // 放在 GitHub Pages 時：直接呼叫 Apps Script 的 API，不帶 Google 登入資訊
+    return fetch(window.ER_API, {
+      method: 'POST', credentials: 'omit', redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ fn: fn, args: args })
+    }).then(function (r) {
+      if (!r.ok) throw new Error('連線失敗（' + r.status + '），請稍後再試');
+      return r.json();
+    }, function () { throw new Error('連不上伺服器，請檢查網路後再試'); }).then(function (j) {
+      if (!j || !j.ok) throw new Error((j && j.error) || '伺服器回應錯誤');
+      return j.result;
+    });
+  }
   return new Promise(function (res, rej) {
     var r = google.script.run.withSuccessHandler(res).withFailureHandler(function (e) {
       rej(e && e.message ? e : new Error(String(e)));
     });
     r[fn].apply(r, args);
   });
+}
+/** 給學生的網址（QR code 用）：在 GitHub Pages 上就用目前這一頁 */
+function frontUrl(d) {
+  if (window.ER_API) return location.origin + location.pathname;
+  return (d && d.appUrl) || '';
 }
 function toast(msg, kind) {
   var t = document.createElement('div');
@@ -372,6 +390,7 @@ function boot() {
     if (c) return doLogin(c, true);
     showLogin();
   };
+  if (window.ER_API) { var q = {}; new URLSearchParams(location.search).forEach(function (v, k) { q[k] = v; }); return go(q); }
   try { google.script.url.getLocation(function (loc) { go(loc.parameter); }); } catch (e) { go({}); }
 }
 function showLogin(msg) {
@@ -808,7 +827,7 @@ function playExtrasText(r) {
   return x.length ? ' · ' + x.join('、') : '';
 }
 function adminCodesHtml(d) {
-  var url = d.appUrl || '';
+  var url = frontUrl(d);
   var groups = d.codes.filter(function (c) { return c.role === 'group'; });
   var teachers = d.codes.filter(function (c) { return c.role === 'teacher'; });
   var h = '<div class="card"><h3>分組（' + groups.length + ' 組）</h3><table><tr><th>組別</th><th>組員（用逗號或頓號分開）</th><th>代碼</th><th></th></tr>' +
@@ -938,7 +957,7 @@ function renderAssemble() {
   app.innerHTML = h;
 }
 function printCodes() {
-  var d = S.admin.data, url = d.appUrl || '';
+  var d = S.admin.data, url = frontUrl(d);
   var list = d.codes.filter(function (c) { return c.role !== 'admin'; });
   var h = topbar('列印代碼', { back: 'toAdminCodes' }) + '<div class="wrap"><div class="btns noprint" style="margin-bottom:12px"><button class="btn" data-act="print">列印</button></div><div class="qrsheet">' + list.map(function (c) {
     return '<div class="cell"><div style="font-weight:700;font-size:18px">' + esc(c.name) + '</div><div class="muted" style="font-size:13px">' + (c.role === 'teacher' ? '老師代碼' : '分組代碼') + '</div><div class="qr" data-qr="' + esc(url ? url + '?c=' + c.code : '') + '"></div><div class="big">' + esc(c.code) + '</div>' +
@@ -1377,7 +1396,7 @@ var ACTIONS = {
   },
   playQr: function (el, id) {
     var r = S.admin.data.rooms.filter(function (x) { return x.id === id; })[0];
-    var url = S.admin.data.appUrl ? S.admin.data.appUrl + '?p=' + r.playCode : '';
+    var url = frontUrl(S.admin.data) ? frontUrl(S.admin.data) + '?p=' + r.playCode : '';
     modal('<h3>' + esc(r.title) + '</h3><p>遊戲代碼</p><div class="big">' + esc(r.playCode) + '</div><div class="qr" data-qr="' + esc(url) + '" style="margin:10px 0"></div><p class="muted" style="word-break:break-all">' + esc(url) + '</p>');
     document.querySelectorAll('#modal [data-qr]').forEach(function (q) { if (url) { try { new QRCode(q, { text: url, width: 200, height: 200 }); } catch (e) { } } });
   },

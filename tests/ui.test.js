@@ -36,7 +36,7 @@ async function shot(page, name) {
 async function seed(page) {
   return page.evaluate(() => {
     GAS('setup')();
-    const A = GAS('showAdminCode')();
+    const A = GAS('adminCode_')();
     GAS('adminSaveSettings')(A, { wrongCooldownSec: 1 });
     const t = GAS('adminCreateTeachers')(A, ['林老師'])[0];
     const mk = (title, answer) => {
@@ -195,7 +195,7 @@ test('一般密室（沒開選用玩法）畫面跟原本一樣，手機寬度�
     const { page, errors } = await openPage(browser, { width: 390, height: 844 });
     const playCode = await page.evaluate(() => {
       GAS('setup')();
-      const A = GAS('showAdminCode')();
+      const A = GAS('adminCode_')();
       const t = GAS('adminCreateTeachers')(A, ['陳老師'])[0];
       const p = GAS('newPuzzle')(t.code);
       GAS('savePuzzle')(t.code, { id: p.id, rev: 0, title: '唯一的一題', kind: 'digital', estMinutes: 5,

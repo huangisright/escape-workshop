@@ -30,7 +30,7 @@ function load() {
   })();`, ctx);
   vm.runInContext(CODE, ctx, { filename: 'Code.gs' });
   ctx.setup();
-  const admin = ctx.showAdminCode();
+  const admin = ctx.adminCode_();
   return {
     gs: ctx,
     mock,

@@ -210,6 +210,13 @@ var GasMock = (function () {
     };
     g.Logger = { log: function (m) { logs.push(String(m)); } };
     g.ScriptApp = { getService: function () { return { getUrl: function () { return 'https://script.google.com/macros/s/TEST/exec'; } }; } };
+    g.ContentService = {
+      MimeType: { JSON: 'application/json' },
+      createTextOutput: function (t) {
+        var o = { text: t, mime: '', setMimeType: function (m) { o.mime = m; return o; }, getContent: function () { return o.text; } };
+        return o;
+      }
+    };
     g.HtmlService = {
       createHtmlOutputFromFile: function () {
         var o = { setTitle: function () { return o; }, addMetaTag: function () { return o; } };

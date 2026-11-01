@@ -15,7 +15,8 @@ test('setup 建立資料庫、資料夾與管理者代碼', () => {
   assert.equal(me.role, 'admin');
   assert.throws(() => env.gs.login('XXXXXX'), /代碼不正確/);
   env.gs.setup(); // 再跑一次不會重建
-  assert.equal(env.gs.showAdminCode(), env.admin);
+  assert.equal(env.gs.showAdminCode(), undefined); // 不回傳，免得從網頁被叫出來
+  assert.ok(env.mock.logs.some((l) => l.includes(env.admin)));
 });
 
 test('老師謎題卡：紅燈擋必填，老師多兩欄必填，可看他人題目但只能改自己的', () => {

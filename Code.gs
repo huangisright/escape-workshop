@@ -48,11 +48,39 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1');
 }
 
+/**
+ * 給放在 GitHub Pages 的畫面呼叫的 API（POST，內容是 {"fn": 函式名稱, "args": [...]}）。
+ * 這樣畫面不必在 script.google.com 上打開，同時登入多個 Google 帳號也不會出錯。
+ * 只開放畫面會用到的函式；setup、showAdminCode 等管理用函式不在名單內。
+ */
+var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
+  'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
+  'playStart', 'startTestPlay', 'playBegin', 'playState', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playRate',
+  'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode',
+  'adminCreateTeacherRoom', 'adminSetRoomPuzzles', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
+  'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
+
+function doPost(e) {
+  var out;
+  try {
+    var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    var fn = String(req.fn || '');
+    if (API_FUNCTIONS.indexOf(fn) < 0) throw new Error('不支援的操作：' + fn);
+    var f = this[fn];
+    if (typeof f !== 'function') throw new Error('不支援的操作：' + fn);
+    var r = f.apply(null, Array.isArray(req.args) ? req.args : []);
+    out = { ok: true, result: r === undefined ? null : r };
+  } catch (err) {
+    out = { ok: false, error: (err && err.message) || String(err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
 /** 第一次使用時執行一次：建立試算表、雲端資料夾與管理者代碼 */
 function setup() {
   var props = PropertiesService.getScriptProperties();
   if (props.getProperty('SS_ID')) {
-    Logger.log('已經設定過了。管理者代碼：' + showAdminCode());
+    Logger.log('已經設定過了。管理者代碼：' + adminCode_());
     return;
   }
   var ss = SpreadsheetApp.create(APP_NAME + '｜資料庫');
@@ -81,12 +109,13 @@ function setup() {
   Logger.log('資料都放在雲端硬碟的「' + APP_NAME + '」資料夾。');
 }
 
-/** 忘記管理者代碼時執行 */
+/** 忘記管理者代碼時執行（只寫在執行紀錄，不回傳，避免從網頁被叫出來） */
 function showAdminCode() {
+  Logger.log('管理者代碼：' + adminCode_());
+}
+function adminCode_() {
   var a = readAll_('Codes').filter(function (r) { return r.role === 'admin'; })[0];
-  var code = a ? a.code : '（找不到，請重新執行 setup）';
-  Logger.log('管理者代碼：' + code);
-  return code;
+  return a ? a.code : '（找不到，請重新執行 setup）';
 }
 
 /* ============================================================
@@ -257,7 +286,10 @@ function login(code) {
     roomId: a.roomId, settings: settings_(), appUrl: appUrl_()
   };
 }
+/** 給學生的網址：有設定 FRONT_URL（例如 GitHub Pages）就用它，否則用 Apps Script 網址 */
 function appUrl_() {
+  var front = prop_('FRONT_URL');
+  if (front) return front;
   try { return ScriptApp.getService().getUrl() || ''; } catch (e) { return ''; }
 }
 

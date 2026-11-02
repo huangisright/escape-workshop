@@ -57,7 +57,7 @@ var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'delete
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
   'playStart', 'startTestPlay', 'playBegin', 'playState', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playRate',
   'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode',
-  'adminCreateTeacherRoom', 'adminSetRoomPuzzles', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
+  'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
 
 function doPost(e) {
@@ -933,7 +933,7 @@ function playStart(playCode, team) {
   playCode = String(playCode || '').trim().toUpperCase();
   team = String(team || '').trim().substring(0, 30);
   if (!team) throw new Error('請輸入隊名');
-  var room = allDocs_('Rooms').filter(function (r) { return r.published && String(r.playCode).toUpperCase() === playCode; })[0];
+  var room = allDocs_('Rooms').filter(function (r) { return r.published && !r.deleted && String(r.playCode).toUpperCase() === playCode; })[0];
   if (!room) throw new Error('遊戲代碼不正確，或這個密室還沒開放');
   return startPlay_(room, room.publishedVersion, team, false);
 }
@@ -1204,7 +1204,7 @@ function adminOverview(code) {
   var puzzles = allDocs_('Puzzles').filter(function (p) { return !p.deleted; });
   var byId = {};
   puzzles.forEach(function (p) { byId[p.id] = p; });
-  var rooms = allDocs_('Rooms').map(function (room) {
+  var rooms = allDocs_('Rooms').filter(function (room) { return !room.deleted; }).map(function (room) {
     var ps = (room.puzzleIds || []).map(function (id) { return byId[id]; }).filter(function (x) { return x; });
     var members = room.kind === 'group' ? membersOfRoom_(room) : [];
     var checks = checkRoom_(room, ps, s, members, false);
@@ -1319,6 +1319,24 @@ function adminCreateTeacherRoom(code, title) {
     return stripRow_(room);
   });
 }
+/**
+ * 刪除示範密室：下架並從管理頁移除。題庫裡的題目不受影響，可以再組成別的密室。
+ * 遊玩紀錄與版本快照保留在試算表與雲端硬碟，需要時還查得到。
+ */
+function adminDeleteRoom(code, roomId) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  return withLock_(function () {
+    var room = getDoc_('Rooms', roomId);
+    if (!room || room.deleted) throw new Error('找不到這個密室');
+    if (room.kind !== 'teacher') throw new Error('分組的密室不能在這裡刪除');
+    room.deleted = true;
+    room.published = false;
+    room.deletedAt = nowStr_();
+    putDoc_('Rooms', room);
+    return true;
+  });
+}
 /** extra（選用）：{ fragments: 與 ids 同順序的碎片, vaultIds: 寶庫題目 } */
 function adminSetRoomPuzzles(code, roomId, ids, extra) {
   var a = account_(code);
@@ -1427,7 +1445,7 @@ function adminMaterials(code) {
   var all = allDocs_('Puzzles');
   var byId = {};
   all.forEach(function (p) { byId[p.id] = p; });
-  return allDocs_('Rooms').map(function (room) {
+  return allDocs_('Rooms').filter(function (room) { return !room.deleted; }).map(function (room) {
     return {
       id: room.id, title: room.title, groupName: room.groupName, location: room.location || '', kind: room.kind,
       puzzles: (room.puzzleIds || []).map(function (id) { return byId[id]; }).filter(function (p) { return p && !p.deleted; })

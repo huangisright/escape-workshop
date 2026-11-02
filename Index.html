@@ -3,6 +3,7 @@
 <head>
 <base target="_top">
 <meta charset="utf-8">
+<title>密室工坊</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 :root{--bg:#f4f1ea;--card:#fff;--ink:#22252a;--muted:#6b6f76;--line:#e2ddd2;--acc:#1f6f6b;--acc2:#e7f2f1;--err:#c0392b;--errbg:#fdecea;--warn:#b7791f;--warnbg:#fdf4e3;--ok:#2f855a;--okbg:#e9f6ee;--r:12px}
@@ -255,29 +256,29 @@ function makeSaver(getData, send, onSaved) {
   var timer = null, inflight = null, seq = 0, sentSeq = 0;
   var api_ = {
     touch: function () { seq++; setSaveStatus('editing'); clearTimeout(timer); timer = setTimeout(api_.flush, 1200); },
+    // 一次只送一筆：還有一筆在路上時，等它回來再決定要不要送下一筆。
+    // （以前兩個等待中的儲存會同時送出同一個版本，第二筆就被當成「別人改過」）
     flush: function () {
       clearTimeout(timer);
-      var wait = inflight || Promise.resolve();
-      return wait.then(function () {
-        if (seq === sentSeq) return;
-        var my = seq;
-        setSaveStatus('saving');
-        inflight = send(clone(getData())).then(function (r) {
-          sentSeq = my;
-          api_.warned = false;
-          onSaved(r);
-          setSaveStatus(seq === sentSeq ? 'saved' : 'editing');
-          if (seq !== sentSeq) timer = setTimeout(api_.flush, 800);
-        }).catch(function (e) {
-          setSaveStatus('error');
-          if (/送審|權限|只能|太長/.test(e.message || '')) { sentSeq = seq; fail(e); }
-          else { // 網路或同時太多人儲存：自動重試
-            if (!api_.warned) { toast('儲存暫時失敗，系統會自動重試，請先不要關掉頁面', 'err'); api_.warned = true; }
-            clearTimeout(timer); timer = setTimeout(api_.flush, 5000);
-          }
-        }).then(function () { inflight = null; });
-        return inflight;
-      });
+      if (inflight) return inflight.then(function () { return api_.flush(); });
+      if (seq === sentSeq) return Promise.resolve();
+      var my = seq;
+      setSaveStatus('saving');
+      inflight = send(clone(getData())).then(function (r) {
+        sentSeq = my;
+        api_.warned = false;
+        onSaved(r);
+        setSaveStatus(seq === sentSeq ? 'saved' : 'editing');
+        if (seq !== sentSeq) timer = setTimeout(api_.flush, 800);
+      }).catch(function (e) {
+        setSaveStatus('error');
+        if (/送審|權限|只能|太長/.test(e.message || '')) { sentSeq = seq; fail(e); }
+        else { // 網路或同時太多人儲存：自動重試
+          if (!api_.warned) { toast('儲存暫時失敗，系統會自動重試，請先不要關掉頁面', 'err'); api_.warned = true; }
+          clearTimeout(timer); timer = setTimeout(api_.flush, 5000);
+        }
+      }).then(function () { inflight = null; });
+      return inflight;
     },
     pending: function () { return seq !== sentSeq; }
   };
@@ -517,7 +518,7 @@ function openPuzzle(id) {
   S.target = 'puzzle';
   S.saver = editable ? makeSaver(function () { return S.puzzle; }, function (d) { return api('savePuzzle', S.code, d); }, function (r) {
     if (r.conflict) {
-      toast('這題剛被別人改過，已載入最新版本', 'err');
+      toast('這題剛在另一台裝置上改過，已載入那邊的版本，請檢查你剛才打的字', 'err');
       S.puzzle = r.puzzle; renderPuzzleEditor(); return;
     }
     S.puzzle.rev = r.puzzle.rev;

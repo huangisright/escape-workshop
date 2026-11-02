@@ -111,7 +111,7 @@
 `tests/` 裡用模擬的 Google 服務（試算表、雲端硬碟等）在電腦上跑 `Code.gs`，不用部署：
 
 ```
-node --test tests/backend.test.js tests/climate.test.js tests/api.test.js   # 後端
+node --test tests/backend.test.js tests/climate.test.js tests/api.test.js tests/autosave.test.js   # 後端
 node --test tests/ui.test.js                                        # 介面（需要 Playwright 與 Chromium）
 ```
 

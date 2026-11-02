@@ -817,7 +817,8 @@ function adminBankHtml(d) {
     h += '<div class="sub"><div class="hd">' + esc(r.title) + '<span class="sp"></span>' + statusChip(r.status) + (r.published ? ' <span class="chip pub">' + esc(r.playCode) + '</span>' : '') + '</div>' +
       '<p style="margin:0 0 6px;font-size:14px">' + sumDots(r.summary) + ' · ' + r.puzzleCount + ' 題 · 預估 ' + r.estTotal + ' / ' + r.timeLimitMin + ' 分鐘' + playExtrasText(r) + '</p>' +
       '<div class="btns"><button class="btn sm" data-act="assemble" data-id="' + r.id + '">挑題與排序</button><button class="btn ghost sm" data-act="trEdit" data-id="' + r.id + '">封面、說明、結局</button>' +
-      '<button class="btn ghost sm" data-act="adminView" data-id="' + r.id + '">檢視</button></div></div>';
+      '<button class="btn ghost sm" data-act="adminView" data-id="' + r.id + '">檢視</button>' +
+      '<button class="btn danger sm" data-act="deleteTR" data-id="' + r.id + '">刪除</button></div></div>';
   });
   h += '<div class="row"><div><label class="f">新的示範密室名稱</label><input type="text" id="trName" placeholder="例如：氣候變遷密室"></div><div style="flex:none"><button class="btn" data-act="createTR">建立</button></div></div></div>';
   return h;
@@ -1420,6 +1421,15 @@ var ACTIONS = {
   print: function () { window.print(); },
   bankOpen: function (el, id) {
     api('adminGetPuzzle', S.code, id).then(function (p) { S.ws = { mode: 'admin', puzzles: [p], room: { id: 'BANK' }, members: [], returnTo: 'bank' }; openPuzzle(id); }).catch(fail);
+  },
+  deleteTR: function (el, id) {
+    var r = S.admin.data.rooms.filter(function (x) { return x.id === id; })[0];
+    var msg = '確定要刪除示範密室「' + (r ? r.title : '') + '」嗎？' + (r && r.published ? '\n它目前已發布，刪除後遊戲代碼 ' + r.playCode + ' 會失效。' : '') +
+      '\n題庫裡的題目不會被刪除，可以再組成別的密室。';
+    confirmBox(msg, '刪除').then(function (ok) {
+      if (!ok) return;
+      api('adminDeleteRoom', S.code, id).then(function () { toast('已刪除'); showAdmin(S.admin.tab); }).catch(fail);
+    });
   },
   createTR: function () {
     var n = document.getElementById('trName').value.trim();

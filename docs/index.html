@@ -153,14 +153,23 @@ function esc(s) {
 function api(fn) {
   var args = Array.prototype.slice.call(arguments, 1);
   if (window.ER_API) { // 放在 GitHub Pages 時：直接呼叫 Apps Script 的 API，不帶 Google 登入資訊
-    return fetch(window.ER_API, {
-      method: 'POST', credentials: 'omit', redirect: 'follow',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ fn: fn, args: args })
-    }).then(function (r) {
-      if (!r.ok) throw new Error('連線失敗（' + r.status + '），請稍後再試');
-      return r.json();
-    }, function () { throw new Error('連不上伺服器，請檢查網路後再試'); }).then(function (j) {
+    // Google 偶爾會回傳沒有跨網域標頭的錯誤頁，瀏覽器就當成連線失敗；等一下再試，最多三次
+    var body = JSON.stringify({ fn: fn, args: args });
+    var attempt = function (n) {
+      return fetch(window.ER_API, {
+        method: 'POST', credentials: 'omit', redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body
+      }).then(function (r) {
+        if (!r.ok) throw { retry: r.status >= 500, msg: '連線失敗（' + r.status + '），請稍後再試' };
+        return r.json();
+      }, function () {
+        throw { retry: true, msg: '連不上伺服器，請檢查網路後再試' };
+      }).catch(function (e) {
+        if (e && e.retry && n < 3) return new Promise(function (res) { setTimeout(res, 1200 * n); }).then(function () { return attempt(n + 1); });
+        throw new Error((e && e.msg) || (e && e.message) || String(e));
+      });
+    };
+    return attempt(1).then(function (j) {
       if (!j || !j.ok) throw new Error((j && j.error) || '伺服器回應錯誤');
       return j.result;
     });

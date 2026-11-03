@@ -255,3 +255,75 @@ test('代碼頁可以勾選多組一次刪除', { skip: !chromium && '沒有 Pla
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
+
+test('分組：按了馬上有反應，返回清單、調整順序、開密室資訊都不用等伺服器', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const { page, errors } = await openPage(browser);
+    const g = await page.evaluate(() => {
+      GAS('setup')();
+      const A = GAS('adminCode_')();
+      return GAS('adminCreateGroups')(A, [{ name: '第一組', members: '甲、乙' }])[0];
+    });
+    await page.fill('#code', g.code);
+    await click(page, '[data-act=login]');
+    await page.waitForSelector('[data-act=newPuzzle]');
+
+    // 把伺服器變慢（每次 1.5 秒），模擬 Apps Script 的實際延遲
+    await page.evaluate(() => {
+      const raw = window.apiRaw;
+      window.__calls = [];
+      window.apiRaw = function (fn) { window.__calls.push(fn); const a = arguments; return new Promise((r) => setTimeout(r, 1500)).then(() => raw.apply(null, a)); };
+    });
+
+    // 按「新增一題」：按鈕立刻轉圈、不能連按
+    await click(page, '[data-act=newPuzzle]');
+    assert.equal(await page.locator('[data-act=newPuzzle].busy').count(), 1, '按下去的按鈕要馬上顯示處理中');
+    await page.waitForTimeout(300);
+    assert.equal(await page.locator('#netbar.on').count(), 1, '頂端出現進度線');
+    await page.locator('[data-act=newPuzzle]').click({ force: true }).catch(() => { });
+    await page.waitForSelector('[data-f=title]');
+    assert.equal((await page.evaluate(() => window.__calls)).filter((f) => f === 'newPuzzle').length, 1, '連按只送出一次');
+    await page.fill('[data-f=title]', '第一題');
+
+    // 返回：清單立刻出現，而且已經是剛改的標題
+    const t0 = Date.now();
+    await click(page, '[data-act=backPuzzle]');
+    await page.waitForSelector('.item:has-text("第一題")');
+    assert.ok(Date.now() - t0 < 1000, '返回清單不用等伺服器（花了 ' + (Date.now() - t0) + 'ms）');
+
+    // 背景存好、更新完之後再做第二題
+    await page.waitForFunction(() => NET.pending === 0 && !(S.saver && S.saver.pending()));
+    await page.waitForTimeout(3500);
+    await click(page, '[data-act=newPuzzle]');
+    await page.waitForSelector('[data-f=title]');
+    await page.fill('[data-f=title]', '第二題');
+    await click(page, '[data-act=backPuzzle]');
+    await page.waitForSelector('.item:has-text("第二題")');
+    await page.waitForTimeout(3500);
+
+    // 上移：畫面立刻換好，伺服器也存成同樣順序
+    const order = () => page.$$eval('.item .t', (els) => els.map((e) => e.textContent));
+    assert.deepEqual(await order(), ['第一題', '第二題']);
+    const t1 = Date.now();
+    await page.locator('.item', { hasText: '第二題' }).locator('[data-dir="-1"]').click();
+    assert.deepEqual(await order(), ['第二題', '第一題']);
+    assert.ok(Date.now() - t1 < 1000);
+    await page.waitForTimeout(2000);
+    const saved = await page.evaluate((code) => GAS('getWorkspace')(code).puzzles.map((p) => p.title), g.code);
+    assert.deepEqual(saved, ['第二題', '第一題']);
+
+    // 密室資訊：直接打開，可以編輯
+    const t2 = Date.now();
+    await click(page, '[data-act=editRoom]');
+    await page.waitForSelector('[data-f="cover.text"]');
+    assert.ok(Date.now() - t2 < 1000, '密室資訊不用等伺服器');
+    assert.equal(await page.locator('[data-f="cover.text"]').isDisabled(), false);
+    await page.fill('[data-f="cover.text"]', '封面文字');
+    await click(page, '[data-act=backRoom]');
+    await page.waitForTimeout(4000);
+    const room = await page.evaluate((code) => GAS('getWorkspace')(code).room, g.code);
+    assert.equal(room.cover.text, '封面文字');
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});

@@ -113,6 +113,7 @@
 ```
 node --test tests/backend.test.js tests/climate.test.js tests/api.test.js tests/autosave.test.js   # 後端
 node --test tests/ui.test.js                                        # 介面（需要 Playwright 與 Chromium）
+node tests/bench.js                                                 # 量每個動作碰試算表幾次、讀多少資料（越少越快）
 ```
 
 - `backend.test.js`：v4 原有的流程（代碼、謎題卡檢核、送審、上傳、發布凍結、遊玩、數據、匯出）。

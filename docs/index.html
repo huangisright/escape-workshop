@@ -128,12 +128,20 @@ body.playing{background:#12161b;color:#eef0f2}
 @media print{.top,.noprint,#toast{display:none!important}.printonly{display:block}body{background:#fff}.card{break-inside:avoid;border-color:#999}.wrap{max-width:none;padding:0}}
 .qrsheet{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .qrsheet .cell{border:1px solid #999;border-radius:10px;padding:12px;text-align:center;break-inside:avoid}
+/* 等伺服器回應時的提示：按下去的按鈕轉圈、畫面頂端跑一條進度線 */
+.busy{position:relative;opacity:.6;cursor:progress!important;pointer-events:none}
+.busy::after{content:"";position:absolute;right:8px;top:50%;width:14px;height:14px;margin-top:-7px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+#netbar{position:fixed;left:0;top:0;height:3px;width:100%;z-index:100;pointer-events:none;opacity:0;transition:opacity .2s;background:linear-gradient(90deg,transparent,var(--acc),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:netbar 1s linear infinite}
+#netbar.on{opacity:1}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes netbar{from{background-position:-40% 0}to{background-position:140% 0}}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 <div id="app"></div>
 <div id="toast"></div>
+<div id="netbar"></div>
 <div id="modal"></div>
 <script>
 /* ============================================================
@@ -150,7 +158,28 @@ function esc(s) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
+/* 背景動作（自動儲存、輪詢、讀圖）不顯示「處理中」，其餘的呼叫都讓使用者馬上看到有在動 */
+var QUIET_FNS = { savePuzzle: 1, saveRoom: 1, playState: 1, adminLive: 1, getFileData: 1 };
+var NET = { pending: 0, timer: null };
+function netBusy(on) {
+  var bar = document.getElementById('netbar');
+  if (on) {
+    if (NET.pending++ === 0) NET.timer = setTimeout(function () { if (bar) bar.className = 'on'; }, 150);
+  } else if (--NET.pending <= 0) {
+    NET.pending = 0; clearTimeout(NET.timer); if (bar) bar.className = '';
+  }
+}
 function api(fn) {
+  var args = arguments;
+  if (QUIET_FNS[fn]) return apiRaw.apply(null, args);
+  // 剛點下去的那顆按鈕（或那一列）：轉圈並暫停點擊，避免連按送出兩次
+  var el = (S.click && Date.now() - S.click.at < 300 && document.contains(S.click.el)) ? S.click.el : null;
+  if (el) { el.classList.add('busy'); S.click = null; }
+  netBusy(true);
+  var done = function () { netBusy(false); if (el) el.classList.remove('busy'); };
+  return apiRaw.apply(null, args).then(function (r) { done(); return r; }, function (e) { done(); throw e; });
+}
+function apiRaw(fn) {
   var args = Array.prototype.slice.call(arguments, 1);
   if (window.ER_API) { // 放在 GitHub Pages 時：直接呼叫 Apps Script 的 API，不帶 Google 登入資訊
     return fetch(window.ER_API, {
@@ -425,12 +454,16 @@ function doLogin(code, silent) {
 /* ============================================================
    分組首頁（也供管理者編輯任一密室）
    ============================================================ */
-function showGroupHome() {
+/* fromCache：先用手上已有的資料立刻畫出來，再到背景向伺服器拿最新版，拿到後悄悄更新 */
+function showGroupHome(fromCache) {
   clearTimers();
   document.body.className = '';
   S.view = 'ws';
-  app.innerHTML = topbar('密室工坊') + '<div class="wrap"><p class="muted">載入中…</p></div>';
-  return api('getWorkspace', S.code).then(function (ws) {
+  var cached = fromCache === true && S.ws && S.ws.mode === 'group' && S.ws.room;
+  if (cached) renderWorkspace();
+  else app.innerHTML = topbar('密室工坊') + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  return (cached ? apiRaw : api)('getWorkspace', S.code).then(function (ws) {
+    if (S.view !== 'ws') return;
     ws.mode = 'group';
     S.ws = ws;
     renderWorkspace();
@@ -485,25 +518,32 @@ function renderWorkspace() {
 /* ============================================================
    老師首頁（題庫）
    ============================================================ */
-function showTeacherHome() {
+function showTeacherHome(fromCache) {
   clearTimers();
   document.body.className = '';
   S.view = 'teacher';
-  app.innerHTML = topbar('密室工坊｜老師題庫') + '<div class="wrap"><p class="muted">載入中…</p></div>';
-  return api('getWorkspace', S.code).then(function (ws) {
+  var cached = fromCache === true && S.ws && S.ws.mode === 'teacher';
+  if (cached) renderTeacherHome();
+  else app.innerHTML = topbar('密室工坊｜老師題庫') + '<div class="wrap"><p class="muted">載入中…</p></div>';
+  return (cached ? apiRaw : api)('getWorkspace', S.code).then(function (ws) {
+    if (S.view !== 'teacher') return;
     S.ws = ws; ws.mode = 'teacher';
-    var mine = ws.puzzles.filter(function (p) { return p.editable; });
-    var others = ws.puzzles.filter(function (p) { return !p.editable; });
-    var row = function (p) {
-      return '<div class="item click" data-act="openPuzzle" data-id="' + esc(p.id) + '"><div class="main"><div class="t">' + esc(p.title || '（未命名）') +
-        '</div><div class="m">' + esc(p.author) + ' · ' + kindLabel(p.kind) + ' · ' + (p.estMinutes ? p.estMinutes + ' 分鐘' : '未填時間') + '</div></div>' + sumDots(summarize(p.checks)) + '</div>';
-    };
-    app.innerHTML = topbar('密室工坊｜老師題庫') + '<div class="wrap">' +
-      '<div class="card"><h3>我的題目</h3><p class="help">題目會進入共用題庫，由管理者組裝成示範密室。發布後再修改，不會影響正在玩的版本。</p><div class="list">' +
-      (mine.length ? mine.map(row).join('') : '<p class="muted">還沒有題目。</p>') + '</div><div class="btns"><button class="btn" data-act="newPuzzle">＋ 新增一題</button></div></div>' +
-      '<div class="card"><h3>其他老師的題目（唯讀）</h3><p class="help">出題前先看看，避免撞題。</p><div class="list">' +
-      (others.length ? others.map(row).join('') : '<p class="muted">目前沒有。</p>') + '</div></div></div>';
+    renderTeacherHome();
   }).catch(fail);
+}
+function renderTeacherHome() {
+  var ws = S.ws;
+  var mine = ws.puzzles.filter(function (p) { return p.editable; });
+  var others = ws.puzzles.filter(function (p) { return !p.editable; });
+  var row = function (p) {
+    return '<div class="item click" data-act="openPuzzle" data-id="' + esc(p.id) + '"><div class="main"><div class="t">' + esc(p.title || '（未命名）') +
+      '</div><div class="m">' + esc(p.author) + ' · ' + kindLabel(p.kind) + ' · ' + (p.estMinutes ? p.estMinutes + ' 分鐘' : '未填時間') + '</div></div>' + sumDots(summarize(p.checks)) + '</div>';
+  };
+  app.innerHTML = topbar('密室工坊｜老師題庫') + '<div class="wrap">' +
+    '<div class="card"><h3>我的題目</h3><p class="help">題目會進入共用題庫，由管理者組裝成示範密室。發布後再修改，不會影響正在玩的版本。</p><div class="list">' +
+    (mine.length ? mine.map(row).join('') : '<p class="muted">還沒有題目。</p>') + '</div><div class="btns"><button class="btn" data-act="newPuzzle">＋ 新增一題</button></div></div>' +
+    '<div class="card"><h3>其他老師的題目（唯讀）</h3><p class="help">出題前先看看，避免撞題。</p><div class="list">' +
+    (others.length ? others.map(row).join('') : '<p class="muted">目前沒有。</p>') + '</div></div></div>';
 }
 
 /* ============================================================
@@ -534,11 +574,18 @@ function openPuzzle(id) {
   renderPuzzleEditor();
 }
 function backFromPuzzle() {
-  leaveEditor().then(function () {
+  var saving = leaveEditor();
+  // 清單上先顯示剛打的內容（存檔回來後會再更新檢核燈號）
+  if (S.puzzle && S.edit.editable) {
+    var idx = (S.ws.puzzles || []).map(function (x) { return x.id; }).indexOf(S.puzzle.id);
+    if (idx >= 0) S.ws.puzzles[idx] = Object.assign(clone(S.puzzle), { editable: S.ws.puzzles[idx].editable });
+  }
+  // 分組和老師：清單馬上回來，等這題存好再到背景更新
+  if (S.ws.returnTo !== 'bank' && S.ws.mode === 'group') { S.view = 'ws'; renderWorkspace(); return saving.then(function () { if (S.view === 'ws') showGroupHome(true); }); }
+  if (S.ws.returnTo !== 'bank' && S.ws.mode === 'teacher') { S.view = 'teacher'; renderTeacherHome(); return saving.then(function () { if (S.view === 'teacher') showTeacherHome(true); }); }
+  saving.then(function () {
     if (S.ws.returnTo === 'bank') return showAdmin('bank');
-    if (S.ws.mode === 'teacher') return showTeacherHome();
     if (S.ws.mode === 'admin') return adminOpenWorkspace(S.ws.room.id);
-    return showGroupHome();
   });
 }
 var BLOCK_TYPES = { text: '文字', image: '圖片', audio: '音檔', html: 'HTML 小遊戲', link: '連結' };
@@ -688,6 +735,17 @@ function openRoomEditor() {
     }) : null;
     renderRoomEditor();
   };
+  // 分組的工作區資料裡已經有完整的密室內容，直接打開，不必再等一次伺服器
+  if (ws.mode === 'group' && ws.room && ws.room.cover) {
+    var r = clone(ws.room); r.editable = ws.editable; go(r);
+    // 背景再確認一次：如果同組有人剛改過、或老師剛鎖定，而這邊還沒開始打字，就換成最新版
+    return apiRaw('getRoom', S.code, ws.room.id).then(function (fresh) {
+      if (S.view !== 'room' || !S.room || S.room.id !== fresh.id) return;
+      if ((fresh.rev || 0) === (S.room.rev || 0) && !!fresh.editable === !!S.edit.editable) return;
+      if (S.saver && S.saver.pending()) return; // 已經在打字：交給儲存時的衝突處理
+      go(fresh);
+    }).catch(function () { });
+  }
   api('getRoom', S.code, ws.room.id).then(go).catch(fail);
 }
 function mediaPageHtml(path, pg, label, ro) {
@@ -738,7 +796,9 @@ function optionalPlayHtml(r) {
   return h + '</div>';
 }
 function backFromRoom() {
-  leaveEditor().then(function () {
+  var saving = leaveEditor();
+  if (S.ws.returnTo !== 'bank' && S.ws.mode === 'group') { S.view = 'ws'; renderWorkspace(); return saving.then(function () { if (S.view === 'ws') showGroupHome(true); }); }
+  saving.then(function () {
     if (S.ws.returnTo === 'bank') return showAdmin('bank');
     if (S.ws.mode === 'admin') return adminOpenWorkspace(S.room.id);
     return showGroupHome();
@@ -1272,7 +1332,8 @@ app.addEventListener('change', function (e) {
 });
 document.addEventListener('click', function (e) {
   var el = e.target.closest('[data-act]');
-  if (!el || el.disabled) return;
+  if (!el || el.disabled || el.classList.contains('busy')) return;
+  S.click = { el: el, at: Date.now() };
   var act = el.getAttribute('data-act'), id = el.getAttribute('data-id');
   if (el.tagName === 'A') e.preventDefault();
   var A = ACTIONS[act];
@@ -1287,9 +1348,19 @@ var ACTIONS = {
   editRoom: function () { openRoomEditor(); },
   backRoom: function () { backFromRoom(); },
   backPuzzle: function () { backFromPuzzle(); },
-  openPuzzle: function (el, id) { if (S.ws.mode === 'teacher') return api('getPuzzle', S.code, id).then(function (p) { var i = S.ws.puzzles.map(function (x) { return x.id; }).indexOf(id); S.ws.puzzles[i] = p; openPuzzle(id); }).catch(fail); openPuzzle(id); },
+  openPuzzle: function (el, id) {
+    var mine = S.ws.mode === 'teacher' && (S.ws.puzzles || []).some(function (x) { return x.id === id && x.editable; });
+    // 老師自己的題目清單裡就有完整內容，直接開；別人的題目才向伺服器拿最新版
+    if (S.ws.mode === 'teacher' && !mine) return api('getPuzzle', S.code, id).then(function (p) { var i = S.ws.puzzles.map(function (x) { return x.id; }).indexOf(id); S.ws.puzzles[i] = p; openPuzzle(id); }).catch(fail); openPuzzle(id); },
   newPuzzle: function () { api('newPuzzle', S.code).then(function (p) { p.editable = true; S.ws.puzzles.push(p); openPuzzle(p.id); }).catch(fail); },
-  movePuzzle: function (el, id) { api('movePuzzle', S.code, id, Number(el.getAttribute('data-dir'))).then(showGroupHome).catch(fail); },
+  movePuzzle: function (el, id) {
+    var dir = Number(el.getAttribute('data-dir')), ps = S.ws.puzzles;
+    var i = ps.map(function (x) { return x.id; }).indexOf(id), j = i + (dir < 0 ? -1 : 1);
+    if (i < 0 || j < 0 || j >= ps.length) return;
+    var t = ps[i]; ps[i] = ps[j]; ps[j] = t; // 先在畫面上換好，伺服器在背景存
+    renderWorkspace();
+    apiRaw('movePuzzle', S.code, id, dir).catch(function (e) { fail(e); showGroupHome(); });
+  },
   deletePuzzle: function () {
     confirmBox('確定要刪除「' + (S.puzzle.title || '這一題') + '」嗎？刪除後無法復原。', '刪除').then(function (ok) {
       if (!ok) return;

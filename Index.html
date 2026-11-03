@@ -835,8 +835,9 @@ function adminCodesHtml(d) {
   var h = '<div class="card"><h3>分組（' + groups.length + ' 組）</h3><table><tr><th>組別</th><th>組員（用逗號或頓號分開）</th><th>代碼</th><th></th></tr>' +
     groups.map(function (c) {
       return '<tr><td><input type="text" data-codename="' + c.code + '" value="' + esc(c.name) + '"></td><td><input type="text" data-codemem="' + c.code + '" value="' + esc(String(c.members || '').split(',').join('、')) + '"></td>' +
-        '<td class="big" style="font-size:18px">' + esc(c.code) + '</td><td><button class="btn ghost sm" data-act="saveCode" data-code="' + c.code + '">儲存</button></td></tr>';
-    }).join('') + '</table>';
+        '<td class="big" style="font-size:18px">' + esc(c.code) + '</td><td style="white-space:nowrap"><button class="btn ghost sm" data-act="saveCode" data-code="' + c.code + '">儲存</button> ' +
+        '<button class="btn danger sm" data-act="deleteGroup" data-code="' + c.code + '">刪除</button></td></tr>';
+    }).join('') + '</table><p class="help">「刪除」只能刪還沒有任何謎題卡的組別，適合清掉重複建立的組。刪除後代碼立即失效。</p>';
   h += '<label class="f">一次新增多組（一行一組，格式：組名：組員、組員、組員）</label><textarea id="newGroups" placeholder="第一組：王小明、李小華、陳大同、林美美&#10;第二組：……"></textarea><div class="btns"><button class="btn" data-act="createGroups">建立分組代碼</button></div></div>';
   h += '<div class="card"><h3>老師（' + teachers.length + ' 位）</h3><table><tr><th>姓名</th><th>代碼</th><th></th></tr>' + teachers.map(function (c) {
     return '<tr><td><input type="text" data-codename="' + c.code + '" value="' + esc(c.name) + '"></td><td class="big" style="font-size:18px">' + esc(c.code) + '</td><td><button class="btn ghost sm" data-act="saveCode" data-code="' + c.code + '">儲存</button></td></tr>';
@@ -1449,6 +1450,14 @@ var ACTIONS = {
     var data = { name: nm ? nm.value : undefined };
     if (mm) data.members = mm.value;
     api('adminUpdateCode', S.code, c, data).then(function () { toast('已儲存'); showAdmin('codes'); }).catch(fail);
+  },
+  deleteGroup: function (el) {
+    var c = el.getAttribute('data-code');
+    var g = S.admin.data.codes.filter(function (x) { return x.code === c; })[0];
+    confirmBox('確定要刪除分組「' + (g ? g.name : '') + '」（代碼 ' + c + '）嗎？\n刪除後這個代碼就不能登入了。', '刪除').then(function (ok) {
+      if (!ok) return;
+      api('adminDeleteGroup', S.code, c).then(function () { toast('已刪除'); showAdmin('codes'); }).catch(fail);
+    });
   },
   createGroups: function () {
     var lines = document.getElementById('newGroups').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);

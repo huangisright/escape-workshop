@@ -69,3 +69,25 @@ test('刪除示範密室：從總覽與材料清單消失、遊戲代碼失效�
   const t = env.plain(env.gs.adminCreateTeachers(env.admin, ['林老師']))[0];
   assert.match(post(env, 'adminDeleteRoom', [t.code, gRoom]).error, /權限/);
 });
+
+test('刪除分組：空的組可刪、代碼失效、從總覽消失；有謎題卡的組不能刪；非管理者不能刪', () => {
+  const env = H.load();
+  const made = env.plain(env.gs.adminCreateGroups(env.admin, [
+    { name: '第一組', members: '甲' }, { name: '第一組', members: '甲' }, { name: '第二組', members: '乙' }
+  ]));
+  const [keep, dup, other] = made;
+  const dupRoom = env.plain(env.gs.login(dup.code)).roomId;
+  const res = post(env, 'adminDeleteGroup', [env.admin, dup.code]);
+  assert.equal(res.ok, true, res.error);
+  const ov = env.plain(env.gs.adminOverview(env.admin));
+  assert.ok(!ov.codes.some((c) => c.code === dup.code));
+  assert.ok(ov.codes.some((c) => c.code === keep.code) && ov.codes.some((c) => c.code === other.code), '其他組被誤刪');
+  assert.ok(!ov.rooms.some((r) => r.id === dupRoom));
+  assert.ok(!env.plain(env.gs.adminMaterials(env.admin)).some((x) => x.id === dupRoom));
+  assert.throws(() => env.gs.login(dup.code), /代碼不正確/);
+  assert.equal(env.plain(env.gs.login(other.code)).name, '第二組', '刪除後其他代碼的資料錯位');
+  env.gs.newPuzzle(keep.code);
+  assert.match(post(env, 'adminDeleteGroup', [env.admin, keep.code]).error, /已經有謎題卡/);
+  assert.match(post(env, 'adminDeleteGroup', [env.admin, env.admin]).error, /找不到這個分組/);
+  assert.match(post(env, 'adminDeleteGroup', [other.code, other.code]).error, /權限/);
+});

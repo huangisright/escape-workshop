@@ -56,7 +56,7 @@ function doGet(e) {
 var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
   'playStart', 'startTestPlay', 'playBegin', 'playState', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playRate',
-  'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode',
+  'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
 
@@ -1306,6 +1306,30 @@ function adminUpdateCode(code, target, data) {
       var room = getDoc_('Rooms', r.roomId);
       if (room) { room.groupName = r.name; putDoc_('Rooms', room); }
     }
+    return true;
+  });
+}
+
+/**
+ * 刪除分組：只限還沒有任何謎題卡的組別（例如多按了「建立分組代碼」產生的重複組）。
+ * 代碼列從 Codes 分頁移除（代碼立即失效），對應的空密室標為已刪除，不再出現在總覽與材料清單。
+ */
+function adminDeleteGroup(code, target) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  return withLock_(function () {
+    var r = readAll_('Codes').filter(function (x) { return x.code === target; })[0];
+    if (!r || r.role !== 'group') throw new Error('找不到這個分組');
+    var room = r.roomId ? getDoc_('Rooms', r.roomId) : null;
+    if (room && !room.deleted) {
+      var used = allDocs_('Puzzles').some(function (p) { return p.roomId === room.id && !p.deleted; });
+      if (used || (room.puzzleIds || []).length) throw new Error('「' + r.name + '」已經有謎題卡了，不能刪除');
+      if (room.published) throw new Error('「' + r.name + '」的密室已發布，不能刪除');
+      room.deleted = true;
+      room.deletedAt = nowStr_();
+      putDoc_('Rooms', room);
+    }
+    sheet_('Codes').deleteRow(r._row);
     return true;
   });
 }

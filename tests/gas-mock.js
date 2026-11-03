@@ -91,6 +91,7 @@ var GasMock = (function () {
       this.rows[this.getLastRow()] = vals.map(store);
       return this;
     };
+    Sheet.prototype.deleteRow = function (row) { this.rows.splice(row - 1, 1); return this; };
     Sheet.prototype.getRange = function (row, col, nr, nc) {
       return new Range(this, row, col, nr || 1, nc || 1);
     };

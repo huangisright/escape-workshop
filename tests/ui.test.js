@@ -226,3 +226,32 @@ test('一般密室（沒開選用玩法）畫面跟原本一樣，手機寬度�
     await browser.close();
   }
 });
+
+test('代碼頁可以勾選多組一次刪除', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const { page, errors } = await openPage(browser);
+    const A = await page.evaluate(() => {
+      GAS('setup')();
+      const A = GAS('adminCode_')();
+      GAS('adminCreateGroups')(A, [1, 2, 3, 1, 2, 3].map((n) => ({ name: '第' + n + '組', members: '甲' })));
+      return A;
+    });
+    await page.fill('#code', A);
+    await click(page, '[data-act=login]');
+    await click(page, '[data-act=adminTab][data-tab=codes]');
+    await page.waitForSelector('[data-groupcheck]');
+    assert.equal(await page.locator('#delGroupsBtn').isDisabled(), true);
+    const boxes = page.locator('[data-groupcheck]');
+    assert.equal(await boxes.count(), 6);
+    for (const i of [3, 4, 5]) await boxes.nth(i).check();
+    assert.match(await page.locator('#delGroupsBtn').textContent(), /3 組/);
+    await click(page, '#delGroupsBtn');
+    await click(page, '#cfOk');
+    await page.waitForFunction(() => document.querySelectorAll('[data-groupcheck]').length === 3);
+    await shot(page, 'batch-delete-groups');
+    await click(page, '[data-act=groupCheckAll]');
+    assert.equal(await page.locator('[data-groupcheck]:checked').count(), 3);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});

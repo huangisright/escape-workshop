@@ -56,7 +56,7 @@ function doGet(e) {
 var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
   'playStart', 'startTestPlay', 'playBegin', 'playState', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playRate',
-  'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup',
+  'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
 
@@ -1318,20 +1318,43 @@ function adminDeleteGroup(code, target) {
   var a = account_(code);
   needRole_(a, ['admin']);
   return withLock_(function () {
-    var r = readAll_('Codes').filter(function (x) { return x.code === target; })[0];
-    if (!r || r.role !== 'group') throw new Error('找不到這個分組');
+    var res = deleteGroups_([target]);
+    if (res.skipped.length) throw new Error(res.skipped[0].reason);
+    return true;
+  });
+}
+/** 一次刪除多組。不能刪的組（已有謎題卡、已發布）略過並回報原因，其他照樣刪除。 */
+function adminDeleteGroups(code, targets) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  return withLock_(function () { return deleteGroups_(targets || []); });
+}
+function deleteGroups_(targets) {
+  var codes = readAll_('Codes');
+  var puzzles = null;
+  var rows = [], deleted = [], skipped = [], seen = {};
+  targets.forEach(function (t) {
+    t = String(t || '');
+    if (seen[t]) return;
+    seen[t] = true;
+    var r = codes.filter(function (x) { return x.code === t; })[0];
+    if (!r || r.role !== 'group') { skipped.push({ code: t, name: '', reason: '找不到這個分組' }); return; }
     var room = r.roomId ? getDoc_('Rooms', r.roomId) : null;
     if (room && !room.deleted) {
-      var used = allDocs_('Puzzles').some(function (p) { return p.roomId === room.id && !p.deleted; });
-      if (used || (room.puzzleIds || []).length) throw new Error('「' + r.name + '」已經有謎題卡了，不能刪除');
-      if (room.published) throw new Error('「' + r.name + '」的密室已發布，不能刪除');
+      if (!puzzles) puzzles = allDocs_('Puzzles');
+      var used = puzzles.some(function (p) { return p.roomId === room.id && !p.deleted; });
+      if (used || (room.puzzleIds || []).length) { skipped.push({ code: t, name: r.name, reason: '「' + r.name + '」已經有謎題卡了，不能刪除' }); return; }
+      if (room.published) { skipped.push({ code: t, name: r.name, reason: '「' + r.name + '」的密室已發布，不能刪除' }); return; }
       room.deleted = true;
       room.deletedAt = nowStr_();
       putDoc_('Rooms', room);
     }
-    sheet_('Codes').deleteRow(r._row);
-    return true;
+    rows.push(r._row);
+    deleted.push({ code: t, name: r.name });
   });
+  // 由下往上刪，前面的列號才不會跑掉
+  rows.sort(function (x, y) { return y - x; }).forEach(function (row) { sheet_('Codes').deleteRow(row); });
+  return { deleted: deleted, skipped: skipped };
 }
 
 function adminCreateTeacherRoom(code, title) {

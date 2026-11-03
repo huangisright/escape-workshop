@@ -91,3 +91,24 @@ test('刪除分組：空的組可刪、代碼失效、從總覽消失；有謎�
   assert.match(post(env, 'adminDeleteGroup', [env.admin, env.admin]).error, /找不到這個分組/);
   assert.match(post(env, 'adminDeleteGroup', [other.code, other.code]).error, /權限/);
 });
+
+test('批次刪除分組：一次刪多組、有謎題卡的組略過並回報、其他組不錯位', () => {
+  const env = H.load();
+  const made = env.plain(env.gs.adminCreateGroups(env.admin, [
+    { name: '一', members: '甲' }, { name: '二', members: '乙' }, { name: '三', members: '丙' },
+    { name: '一', members: '甲' }, { name: '二', members: '乙' }, { name: '三', members: '丙' }
+  ]));
+  env.gs.newPuzzle(made[1].code); // 第二組已經開始做
+  const targets = [made[3].code, made[1].code, made[5].code, made[4].code, made[3].code];
+  const res = post(env, 'adminDeleteGroups', [env.admin, targets]);
+  assert.equal(res.ok, true, res.error);
+  assert.deepEqual(res.result.deleted.map((x) => x.code).sort(), [made[3].code, made[4].code, made[5].code].sort());
+  assert.equal(res.result.skipped.length, 1);
+  assert.match(res.result.skipped[0].reason, /已經有謎題卡/);
+  const left = env.plain(env.gs.adminOverview(env.admin)).codes.filter((c) => c.role === 'group');
+  assert.deepEqual(left.map((c) => c.code), [made[0].code, made[1].code, made[2].code]);
+  for (const m of made.slice(0, 3)) assert.equal(env.plain(env.gs.login(m.code)).name, m.name, '留下的組資料錯位');
+  for (const m of made.slice(3)) assert.throws(() => env.gs.login(m.code), /代碼不正確/);
+  assert.equal(env.plain(env.gs.adminOverview(env.admin)).rooms.filter((r) => r.kind === 'group').length, 3);
+  assert.match(post(env, 'adminDeleteGroups', [made[0].code, [made[2].code]]).error, /權限/);
+});

@@ -159,29 +159,102 @@ function cellSafe_(v) {
 function withLock_(fn) {
   var lock = LockService.getScriptLock();
   lock.waitLock(25000);
+  // 拿到鎖之後，別人可能剛寫過，所以這次請求先前讀過的內容都不算數
+  resetMemo_();
   try { return fn(); } finally { lock.releaseLock(); }
 }
 
-function readAll_(name) {
-  var sh = sheet_(name);
-  var last = sh.getLastRow();
-  if (last < 2) return [];
-  var cols = SHEETS[name];
-  var vals = sh.getRange(2, 1, last - 1, cols.length).getValues();
-  return vals.map(function (r, i) {
-    var o = { _row: i + 2 };
-    cols.forEach(function (c, j) {
-      var v = r[j];
-      if (typeof v === 'string' && v.charAt(0) === "'") v = v.substring(1);
-      o[c] = v;
-    });
-    return o;
+/* ---------- 讀表（同一次請求內只讀一次） ----------
+ * Apps Script 每碰一次試算表都要花時間，整張表連同每題內容一起讀更慢。
+ * _memo 只活在這一次請求裡（每次呼叫都是全新的執行環境），寫入時就丟掉該表的紀錄。
+ */
+var _memo = {};
+function resetMemo_() { _memo = {}; }
+function forget_(name, rowsMoved) {
+  delete _memo['all:' + name];
+  if (rowsMoved) delete _memo['idx:' + name];
+  if (name === 'Codes') {
+    try { CacheService.getScriptCache().remove(CODES_CACHE); } catch (e) { }
+  }
+}
+function rowObj_(cols, r, rowNo) {
+  var o = { _row: rowNo };
+  cols.forEach(function (c, j) {
+    var v = r[j];
+    if (typeof v === 'string' && v.charAt(0) === "'") v = v.substring(1);
+    o[c] = v;
   });
+  return o;
+}
+function copyRows_(rows) {
+  return rows.map(function (r) { var o = {}; for (var k in r) o[k] = r[k]; return o; });
+}
+function readAll_(name) {
+  var key = 'all:' + name;
+  if (!_memo[key]) {
+    var sh = sheet_(name);
+    var last = sh.getLastRow();
+    var cols = SHEETS[name];
+    _memo[key] = last < 2 ? [] : sh.getRange(2, 1, last - 1, cols.length).getValues().map(function (r, i) {
+      return rowObj_(cols, r, i + 2);
+    });
+  }
+  return copyRows_(_memo[key]);
+}
+/** 只讀第一欄（id），回傳 { id: [列號…] }，不必把每題的完整內容讀進來 */
+function idIndex_(name) {
+  var key = 'idx:' + name;
+  if (_memo[key]) return _memo[key];
+  var idx = {};
+  var all = _memo['all:' + name];
+  if (all) all.forEach(function (r) { (idx[r[SHEETS[name][0]]] = idx[r[SHEETS[name][0]]] || []).push(r._row); });
+  else {
+    var sh = sheet_(name);
+    var last = sh.getLastRow();
+    if (last >= 2) sh.getRange(2, 1, last - 1, 1).getValues().forEach(function (r, i) {
+      var id = r[0];
+      if (typeof id === 'string' && id.charAt(0) === "'") id = id.substring(1);
+      (idx[id] = idx[id] || []).push(i + 2);
+    });
+  }
+  _memo[key] = idx;
+  return idx;
+}
+/** 依 id 讀出指定幾列；lastOnly 時同一個 id 只取最後一列 */
+function rowsById_(name, ids, lastOnly) {
+  var idx = idIndex_(name);
+  var want = [];
+  ids.forEach(function (id) {
+    var rows = idx[id] || [];
+    if (lastOnly) rows = rows.slice(-1);
+    rows.forEach(function (n) { want.push(n); });
+  });
+  if (!want.length) return [];
+  var all = _memo['all:' + name];
+  if (all) return copyRows_(all.filter(function (r) { return want.indexOf(r._row) >= 0; }));
+  var cols = SHEETS[name];
+  var lo = Math.min.apply(null, want), hi = Math.max.apply(null, want);
+  var vals = sheet_(name).getRange(lo, 1, hi - lo + 1, cols.length).getValues();
+  return want.sort(function (x, y) { return x - y; }).map(function (n) { return rowObj_(cols, vals[n - lo], n); });
+}
+/** 代碼表：每次請求都要查，放進快取（10 分鐘；改代碼時會立刻清掉） */
+var CODES_CACHE = 'codes:v1';
+function codes_() {
+  if (_memo['all:Codes']) return readAll_('Codes');
+  var cache = CacheService.getScriptCache(), hit = null;
+  try { hit = cache.get(CODES_CACHE); } catch (e) { }
+  if (hit) {
+    try { _memo['all:Codes'] = JSON.parse(hit); return readAll_('Codes'); } catch (e) { }
+  }
+  var rows = readAll_('Codes');
+  try { cache.put(CODES_CACHE, JSON.stringify(rows), 600); } catch (e) { }
+  return rows;
 }
 function appendRow_(name, obj) {
   var cols = SHEETS[name];
   var sh = sheet_(name);
   sh.appendRow(cols.map(function (c) { return c === 'json' || c === 'state' ? (obj[c] || '') : cellSafe_(obj[c]); }));
+  forget_(name, true);
   return sh.getLastRow();
 }
 function writeRow_(name, row, obj) {
@@ -189,6 +262,7 @@ function writeRow_(name, row, obj) {
   sheet_(name).getRange(row, 1, 1, cols.length).setValues([cols.map(function (c) {
     return c === 'json' || c === 'state' ? (obj[c] || '') : cellSafe_(obj[c]);
   })]);
+  forget_(name);
 }
 
 /* ---------- JSON 文件（密室與謎題） ---------- */
@@ -204,23 +278,24 @@ function docCols_(name, d) {
   };
 }
 function allDocs_(name) {
-  return readAll_(name).map(function (r) {
-    var d = {};
-    try { d = JSON.parse(r.json); } catch (e) { d = { id: r.id, broken: true }; }
-    d._row = r._row;
-    return d;
-  });
+  return readAll_(name).map(parseDoc_);
 }
+function parseDoc_(r) {
+  var d;
+  try { d = JSON.parse(r.json); } catch (e) { d = { id: r.id, broken: true }; }
+  d._row = r._row;
+  return d;
+}
+/** 只讀這一列，不讀整張表 */
 function getDoc_(name, id) {
-  var rows = readAll_(name);
-  for (var i = 0; i < rows.length; i++) {
-    if (rows[i].id === id) {
-      var d = JSON.parse(rows[i].json);
-      d._row = rows[i]._row;
-      return d;
-    }
-  }
-  return null;
+  var rows = rowsById_(name, [id]);
+  return rows.length ? parseDoc_(rows[0]) : null;
+}
+/** 依 id 讀好幾份文件（例如一間密室的題目），回傳 { id: 文件 } */
+function getDocs_(name, ids) {
+  var out = {};
+  rowsById_(name, ids).forEach(function (r) { if (!out[r.id]) out[r.id] = parseDoc_(r); });
+  return out;
 }
 function putDoc_(name, d) {
   d.updated = nowStr_();
@@ -249,7 +324,7 @@ function statusLabel_(s) {
 function account_(code) {
   code = String(code || '').trim().toUpperCase();
   if (!code) throw new Error('請輸入代碼');
-  var rows = readAll_('Codes');
+  var rows = codes_();
   for (var i = 0; i < rows.length; i++) if (String(rows[i].code).toUpperCase() === code) {
     var a = rows[i];
     a.membersList = String(a.members || '').split(/[,，、\s]+/).filter(function (x) { return x; });
@@ -320,10 +395,10 @@ function getWorkspace(code) {
   }
   throw new Error('管理者請使用總覽頁');
 }
-function roomPuzzles_(room) {
-  var all = allDocs_('Puzzles');
-  var byId = {};
-  all.forEach(function (p) { byId[p.id] = p; });
+/** saved：剛存好的那一題，直接用它，不必再讀一次 */
+function roomPuzzles_(room, saved) {
+  var byId = getDocs_('Puzzles', room.puzzleIds || []);
+  if (saved) byId[saved.id] = saved;
   return (room.puzzleIds || []).map(function (id) { return byId[id]; })
     .filter(function (p) { return p && !p.deleted; });
 }
@@ -369,7 +444,7 @@ var PUZZLE_FIELDS = ['title', 'author', 'kind', 'estMinutes', 'steps', 'blocks',
 
 function savePuzzle(code, data) {
   var a = account_(code);
-  return withLock_(function () {
+  var done = withLock_(function () {
     var s = settings_();
     var p = getDoc_('Puzzles', data.id);
     if (!p || p.deleted) throw new Error('找不到這一題，可能已被刪除');
@@ -385,13 +460,17 @@ function savePuzzle(code, data) {
     if (a.role === 'teacher') p.author = a.name;
     p.rev = (p.rev || 0) + 1;
     putDoc_('Puzzles', p);
-    var out = { puzzle: withChecks_(p, s, p.roomId === BANK ? 'teacher' : 'group') };
-    if (room) {
-      var members = room.kind === 'group' ? membersOfRoom_(room) : [];
-      out.roomChecks = checkRoom_(room, roomPuzzles_(room), s, members, false);
-    }
-    return out;
+    return { p: p, room: room, s: s };
   });
+  if (done.conflict) return done;
+  // 檢核放在鎖外面做：存檔一寫完就放開鎖，別組的儲存不用排在這後面
+  var p = done.p, room = done.room, s = done.s;
+  var out = { puzzle: withChecks_(p, s, p.roomId === BANK ? 'teacher' : 'group') };
+  if (room) {
+    var members = room.kind === 'group' ? membersOfRoom_(room) : [];
+    out.roomChecks = checkRoom_(room, roomPuzzles_(room, p), s, members, false);
+  }
+  return out;
 }
 
 function deletePuzzle(code, id) {
@@ -437,7 +516,7 @@ var ROOM_ADMIN_FIELDS = ['timeLimitMin', 'location', 'groupName', 'finale', 'ski
 
 function saveRoom(code, data) {
   var a = account_(code);
-  return withLock_(function () {
+  var done = withLock_(function () {
     var room = getDoc_('Rooms', data.id);
     if (!room) throw new Error('找不到密室');
     if (!canEditRoom_(a, room)) {
@@ -449,12 +528,14 @@ function saveRoom(code, data) {
     if (a.role === 'admin') ROOM_ADMIN_FIELDS.forEach(function (f) { if (data[f] !== undefined) room[f] = data[f]; });
     room.rev = (room.rev || 0) + 1;
     putDoc_('Rooms', room);
-    var s = settings_();
-    return {
-      room: stripRow_(room),
-      roomChecks: checkRoom_(room, roomPuzzles_(room), s, membersOfRoom_(room), false)
-    };
+    return { room: room };
   });
+  if (done.conflict) return done;
+  var room = done.room;
+  return {
+    room: stripRow_(room),
+    roomChecks: checkRoom_(room, roomPuzzles_(room), settings_(), membersOfRoom_(room), false)
+  };
 }
 
 function blankRoom_(kind, ownerCode, title, s) {
@@ -482,7 +563,7 @@ function roomVault_(room) {
 }
 function membersOfRoom_(room) {
   if (room.kind !== 'group') return [];
-  var c = readAll_('Codes').filter(function (r) { return r.code === room.ownerCode; })[0];
+  var c = codes_().filter(function (r) { return r.code === room.ownerCode; })[0];
   return c ? String(c.members || '').split(/[,，、\s]+/).filter(function (x) { return x; }) : [];
 }
 
@@ -815,13 +896,10 @@ function gates_(p) {
   return g;
 }
 function findPlay_(playId) {
-  var rows = readAll_('Plays');
-  for (var i = rows.length - 1; i >= 0; i--) if (rows[i].id === playId) {
-    var r = rows[i];
-    r.st = JSON.parse(r.state || '{}');
-    return r;
-  }
-  throw new Error('找不到這場遊戲，請重新開始');
+  var r = rowsById_('Plays', [playId], true)[0];
+  if (!r) throw new Error('找不到這場遊戲，請重新開始');
+  r.st = JSON.parse(r.state || '{}');
+  return r;
 }
 function savePlay_(r) {
   r.state = JSON.stringify(r.st);
@@ -987,11 +1065,18 @@ function playBegin(playId) {
 
 /** havePuzzleId：前端已經有這題內容時就不重傳圖片 */
 function playState(playId, havePuzzleId) {
+  // 一般情況只是讀狀態，不必排隊等鎖；只有時間到、要寫入結果時才上鎖
+  var r = findPlay_(playId);
+  if (!timeoutDue_(r)) return stateOf_(r, havePuzzleId);
   return withLock_(function () {
-    var r = findPlay_(playId);
-    checkTimeout_(r);
-    return stateOf_(r, havePuzzleId);
+    var r2 = findPlay_(playId);
+    checkTimeout_(r2);
+    return stateOf_(r2, havePuzzleId);
   });
+}
+function timeoutDue_(r) {
+  if (!r.st.startMs || !active_(r)) return false;
+  return elapsedMs_(r) > limitMs_(loadSnapshot_(r.st.snap));
 }
 
 function checkTimeout_(r) {
@@ -1372,6 +1457,7 @@ function deleteGroups_(targets) {
   });
   // 由下往上刪，前面的列號才不會跑掉
   rows.sort(function (x, y) { return y - x; }).forEach(function (row) { sheet_('Codes').deleteRow(row); });
+  forget_('Codes', true);
   return { deleted: deleted, skipped: skipped };
 }
 

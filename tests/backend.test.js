@@ -233,3 +233,39 @@ test('材料清單與管理總覽', () => {
   assert.equal(ov.rooms[0].puzzleCount, 1);
   assert.equal(env.mock.lockDepth(), 0, '所有鎖都有釋放');
 });
+
+test('提示可以放圖片：只有圖片也算一層，開放後才拿得到圖', () => {
+  const env = H.load();
+  const t = env.plain(env.gs.adminCreateTeachers(env.admin, ['林老師']))[0];
+  const p0 = env.plain(env.gs.newPuzzle(t.code));
+  const up = env.plain(env.gs.uploadFile(t.code, { puzzleId: p0.id, label: '提示圖片', name: 'hint.jpg', mime: 'image/jpeg' }, 'AAECAw==', false));
+  const p = H.savePuzzle(env, t.code, p0, H.fullPuzzle({
+    title: '圖片提示題', answer: 'OCEAN',
+    hints: [{ text: '', imageId: up.fileId, delaySec: 0 }, { text: '看海', delaySec: 0 }]
+  }));
+  assert.deepEqual(levels(p.checks), ['ok'], '只放圖片的提示也算完成');
+
+  const room = env.plain(env.gs.adminCreateTeacherRoom(env.admin, '圖片提示密室'));
+  env.gs.adminSetRoomPuzzles(env.admin, room.id, [p.id]);
+  H.fillRoomPages(env, env.admin, room.id);
+  const pub = env.plain(env.gs.adminRoomAction(env.admin, room.id, 'publish'));
+  const { id, st } = H.startPlay(env, pub.playCode);
+  assert.equal(st.hintTotal, 2, '只有圖片的那層也算');
+  assert.throws(() => env.gs.playHintImage(id, 0), /還沒開放/);
+
+  const r = env.plain(env.gs.playHint(id));
+  assert.deepEqual(r.state.hintsShown, ['']);
+  assert.deepEqual(r.state.hintImgs, [true]);
+  assert.ok(!JSON.stringify(r.state).includes('base64'), '狀態裡不夾圖片，另外抓');
+  const img = env.plain(env.gs.playHintImage(id, 0));
+  assert.equal(img.src, 'data:image/jpeg;base64,AAECAw==');
+  assert.equal(img.puzzleId, p.id);
+
+  const r2 = env.plain(env.gs.playHint(id));
+  assert.deepEqual(r2.state.hintImgs, [true, false]);
+  assert.equal(env.plain(env.gs.playHintImage(id, 1)).src, '');
+
+  env.gs.adminExport(env.admin, room.id, 'room');
+  const html = Object.values(env.mock.files).find((f) => /整間密室\.html$/.test(f.name)).blob.getDataAsString();
+  assert.ok(html.includes('data:image/jpeg;base64,AAECAw=='), '離線版也帶提示圖片');
+});

@@ -255,3 +255,53 @@ test('代碼頁可以勾選多組一次刪除', { skip: !chromium && '沒有 Pla
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
+
+test('提示可以放圖片：老師上傳 → 玩家看提示時看到圖', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const { page, errors } = await openPage(browser, { width: 820, height: 1180 });
+    const seedInfo = await page.evaluate(() => {
+      GAS('setup')();
+      const A = GAS('adminCode_')();
+      const t = GAS('adminCreateTeachers')(A, ['陳老師'])[0];
+      const p = GAS('newPuzzle')(t.code);
+      GAS('savePuzzle')(t.code, { id: p.id, rev: 0, title: '海圖', kind: 'digital', estMinutes: 5,
+        steps: [{ get: 'a', act: 'b', result: 'c', checkpoint: '' }], blocks: [{ type: 'text', text: '看海圖找密碼' }],
+        answer: 'SEA', hints: [{ text: '看藍色的圓', delaySec: 0 }], themeLink: 'x', scienceBasis: 'y', reskinCheck: 'z' });
+      return { A, tcode: t.code, pid: p.id };
+    });
+    await page.fill('#code', seedInfo.tcode);
+    await click(page, '[data-act=login]');
+    await click(page, '[data-act=openPuzzle]');
+    await page.setInputFiles('input[data-upload=hintimg][data-i="0"]', path.join(__dirname, 'fixture-hint.png'));
+    await page.waitForFunction(() => { const i = document.querySelector('img.thumb[alt=提示圖片]'); return i && /^data:image/.test(i.src); });
+    await shot(page, '10-editor-hint-image');
+    await page.waitForFunction((a) => { const p = GAS('getPuzzle')(a.tcode, a.pid); return p.hints[0].imageId; }, seedInfo, { timeout: 15000 });
+
+    const playCode = await page.evaluate((a) => {
+      const room = GAS('adminCreateTeacherRoom')(a.A, '圖片提示密室');
+      GAS('adminSetRoomPuzzles')(a.A, room.id, [a.pid]);
+      GAS('saveRoom')(a.A, { id: room.id, rev: 1, cover: { text: '封面', imageId: '' }, story: [{ text: '說明', imageId: '' }],
+        success: { text: '成功', imageId: '' }, fail: { text: '失敗', imageId: '' } });
+      return GAS('adminRoomAction')(a.A, room.id, 'publish').playCode;
+    }, seedInfo);
+    await click(page, '[data-act=logout]');
+    await page.fill('#pcode', playCode);
+    await click(page, '[data-act=toPlay]');
+    await page.fill('#team', '一隊');
+    await click(page, '[data-act=playStart]');
+    while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
+    await page.waitForSelector('#hintBtn:not([disabled])');
+    await click(page, '#hintBtn');
+    await page.waitForFunction(() => { const i = document.querySelector('.phint img[data-hint-img]'); return i && /^data:image/.test(i.src) && i.naturalWidth > 0; });
+    assert.match(await page.textContent('.phint'), /看藍色的圓/);
+    await shot(page, '11-play-hint-image');
+    // 答錯重畫面板時，圖片從快取補回來
+    await page.fill('#ans', 'xxx');
+    await click(page, '#goBtn');
+    await page.waitForFunction(() => { const i = document.querySelector('.phint img[data-hint-img]'); return i && /^data:image/.test(i.src); });
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});

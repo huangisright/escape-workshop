@@ -55,7 +55,7 @@ function doGet(e) {
  */
 var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
-  'playStart', 'startTestPlay', 'playBegin', 'playState', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playRate',
+  'playStart', 'startTestPlay', 'playBegin', 'playState', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playHintImage', 'playRate',
   'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
@@ -667,6 +667,10 @@ function norm_(s) {
 function splitAnswers_(s) {
   return String(s || '').split(/[\/／\n]/).map(function (x) { return x.trim(); }).filter(function (x) { return x; });
 }
+/** 一層提示只要有文字或圖片就算有內容 */
+function hintOk_(h) { return !!h && (!!String(h.text || '').trim() || !!h.imageId); }
+function hintsOf_(p) { return (p.hints || []).filter(hintOk_); }
+
 function visibleText_(p) {
   var t = [p.title || ''];
   (p.blocks || []).forEach(function (b) { if (b.text) t.push(b.text); if (b.caption) t.push(b.caption); if (b.label) t.push(b.label); });
@@ -720,7 +724,7 @@ function checkPuzzle_(p, s, kind, deep) {
     }
   }
 
-  var hints = (p.hints || []).filter(function (h) { return String(h.text || '').trim(); });
+  var hints = hintsOf_(p);
   if (!hints.length) chk_(c, 'err', '至少要有一層提示');
   if (hints.length > s.maxHints) chk_(c, 'warn', '提示超過 ' + s.maxHints + ' 層');
 
@@ -1125,13 +1129,14 @@ function stateOf_(r, havePuzzleId) {
   var p = current_(snap, r.st);
   var gates = gates_(p);
   var since = Math.floor((nowMs_() - r.st.puzzleStart) / 1000);
-  var visibleHints = (p.hints || []).filter(function (h) { return String(h.text || '').trim(); });
+  var visibleHints = hintsOf_(p);
   out.puzzleId = p.id;
   out.title = p.title;
   out.gate = r.st.gate;
   out.gateCount = gates.length;
   out.gateLabel = gates[r.st.gate].label;
-  out.hintsShown = visibleHints.slice(0, r.st.hints).map(function (h) { return h.text; });
+  out.hintsShown = visibleHints.slice(0, r.st.hints).map(function (h) { return String(h.text || ''); });
+  out.hintImgs = visibleHints.slice(0, r.st.hints).map(function (h) { return !!h.imageId; });
   out.hintTotal = visibleHints.length;
   out.nextHintInSec = r.st.hints < visibleHints.length
     ? Math.max(0, (Number(visibleHints[r.st.hints].delaySec) || 0) - since) : -1;
@@ -1253,7 +1258,7 @@ function playHint(playId) {
     if (!active_(r)) return { state: stateOf_(r, '*') };
     var snap = loadSnapshot_(r.st.snap);
     var p = current_(snap, r.st);
-    var hints = (p.hints || []).filter(function (h) { return String(h.text || '').trim(); });
+    var hints = hintsOf_(p);
     var since = Math.floor((nowMs_() - r.st.puzzleStart) / 1000);
     if (r.st.hints < hints.length && since >= (Number(hints[r.st.hints].delaySec) || 0)) {
       r.st.hints++;
@@ -1262,6 +1267,19 @@ function playHint(playId) {
     }
     return { state: stateOf_(r, p.id) };
   });
+}
+
+/** 玩家看已經開放的提示圖片（第 n 層，從 0 起算） */
+function playHintImage(playId, n) {
+  var r = findPlay_(playId);
+  var snap = loadSnapshot_(r.st.snap);
+  var p = current_(snap, r.st);
+  if (!p) throw new Error('目前沒有進行中的題目');
+  var hints = hintsOf_(p);
+  n = Number(n);
+  if (!(n >= 0 && n < r.st.hints && n < hints.length)) throw new Error('這層提示還沒開放');
+  if (!hints[n].imageId) return { puzzleId: p.id, n: n, src: '' };
+  return { puzzleId: p.id, n: n, src: fileData_(hints[n].imageId).dataUrl };
 }
 
 function playRate(playId, ratings, liked, stuck) {
@@ -1699,7 +1717,11 @@ function adminExport(code, roomId, mode) {
       puzzles: ps.map(function (p) {
         return {
           title: p.title, author: p.author, blocks: renderBlocks_(p.blocks || []),
-          hints: (p.hints || []).filter(function (h) { return String(h.text || '').trim(); }),
+          hints: hintsOf_(p).map(function (h) {
+            var o = { text: String(h.text || ''), delaySec: Number(h.delaySec) || 0 };
+            if (h.imageId) { try { o.src = fileData_(h.imageId).dataUrl; } catch (e) { } }
+            return o;
+          }),
           gates: gates_(p).map(function (g) {
             return { label: g.label, hashes: g.answers.map(function (x) { return sha256Hex_(norm_(x)); }) };
           })
@@ -1748,7 +1770,7 @@ var OFFLINE_CSS = [
   'input{width:100%;font-size:22px;padding:14px;border-radius:10px;border:1px solid #3a4552;background:#0f1317;color:#fff}',
   'button{font-size:18px;padding:12px 20px;border-radius:10px;border:0;background:#f3c969;color:#1b1b1b;cursor:pointer;margin-top:10px}',
   'button.ghost{background:transparent;color:#f3c969;border:1px solid #f3c969}button:disabled{opacity:.45}',
-  '.msg{min-height:26px;margin-top:8px;color:#ff9b8a}.ok{color:#8fe0a6}.hint{border-left:3px solid #f3c969;padding:6px 12px;margin:8px 0;color:#f6e3b3}',
+  '.msg{min-height:26px;margin-top:8px;color:#ff9b8a}.ok{color:#8fe0a6}.hint{border-left:3px solid #f3c969;padding:6px 12px;margin:8px 0;color:#f6e3b3}.hint img{display:block;max-width:100%;margin-top:8px;border-radius:8px}',
   'a{color:#9cc9ff}'
 ].join('');
 
@@ -1775,7 +1797,7 @@ var OFFLINE_JS = [
   'h+="</div><div class=card><div>"+(p.gates.length>1?"第 "+(S.g+1)+" 步："+esc(g.label):"答案")+"</div><input id=an autocomplete=off><button id=go>送出</button><div class=msg id=ms></div><div id=hs></div><button class=ghost id=hb></button></div>";app.innerHTML=h;',
   'Array.prototype.forEach.call(app.querySelectorAll("iframe[data-i]"),function(f){f.srcdoc=p.blocks[+f.getAttribute("data-i")].html});',
   'document.getElementById("go").onclick=submit;document.getElementById("an").onkeydown=function(e){if(e.key==="Enter")submit()};document.getElementById("hb").onclick=hint;renderHints();hintBtn()}',
-  'function renderHints(){var p=DATA.puzzles[S.i],e=document.getElementById("hs");if(!e)return;e.innerHTML=p.hints.slice(0,S.h).map(function(x,k){return"<div class=hint>提示 "+(k+1)+"："+esc(x.text)+"</div>"}).join("")}',
+  'function renderHints(){var p=DATA.puzzles[S.i],e=document.getElementById("hs");if(!e)return;e.innerHTML=p.hints.slice(0,S.h).map(function(x,k){return"<div class=hint>提示 "+(k+1)+"："+esc(x.text)+(x.src?"<img src=\'"+x.src+"\'>":"")+"</div>"}).join("")}',
   'function hintBtn(){var b=document.getElementById("hb");if(!b)return;var p=DATA.puzzles[S.i];if(S.h>=p.hints.length){b.style.display="none";return}var w=(p.hints[S.h].delaySec||0)-Math.floor((Date.now()-S.ps)/1000);b.disabled=w>0;b.textContent=w>0?"提示 "+(S.h+1)+"（"+w+" 秒後可看）":"看提示 "+(S.h+1)}',
   'function hint(){S.h++;renderHints();hintBtn()}',
   'function submit(){var v=document.getElementById("an").value,p=DATA.puzzles[S.i],g=p.gates[S.g],m=document.getElementById("ms");var hv=sha256(norm(v));if(norm(v)&&g.hashes.indexOf(hv)>=0){if(S.g<p.gates.length-1){S.g++;show();document.getElementById("ms").className="msg ok";document.getElementById("ms").textContent="正確！繼續下一步"}else{S.i++;S.g=0;S.h=0;S.ps=Date.now();if(S.i>=DATA.puzzles.length){S.done=true;clearInterval(S.timer);page(DATA.success,"","")}else show()}}else{m.className="msg";m.textContent="答案不對，再想想"}}',

@@ -109,6 +109,7 @@ body.playing{background:#12161b;color:#eef0f2}
 .pmsg{min-height:28px;margin-top:10px;font-size:17px}
 .pmsg.bad{color:#ff9b8a}.pmsg.good{color:#8fe0a6}
 .phint{border-left:3px solid #f3c969;padding:6px 12px;margin:10px 0;color:#f6e3b3;white-space:pre-wrap}
+.phint img{display:block;max-width:100%;max-height:60vh;margin-top:8px;border-radius:8px}
 .gate{color:#f3c969;font-size:15px;margin-bottom:8px}
 .stars button{font-size:28px;background:transparent;border:0;color:#5a6470;cursor:pointer;padding:2px}
 .stars button.on{color:#f3c969}
@@ -631,9 +632,11 @@ function renderPuzzleEditor() {
     '<input type="text" data-f="answer" value="' + esc(p.answer) + '"' + dis + '></div>';
 
   // 5 提示
-  h += '<div class="card"><h3><span class="no">5</span>提示</h3><p class="help">第一層只提醒方向，第二層再具體一點，不要直接給答案。秒數是「這題開始後多久才能看」。</p>';
+  h += '<div class="card"><h3><span class="no">5</span>提示</h3><p class="help">第一層只提醒方向，第二層再具體一點，不要直接給答案。每層可以只寫文字、只放圖片，或兩個都有。秒數是「這題開始後多久才能看」。</p>';
   (p.hints || []).forEach(function (x, i) {
-    h += '<div class="row" style="margin-bottom:8px"><div style="flex:4"><label class="f">第 ' + (i + 1) + ' 層提示</label><textarea style="min-height:60px" data-f="hints.' + i + '.text"' + dis + '>' + esc(x.text) + '</textarea></div>' +
+    h += '<div class="row" style="margin-bottom:8px"><div style="flex:4"><label class="f">第 ' + (i + 1) + ' 層提示</label><textarea style="min-height:60px" data-f="hints.' + i + '.text"' + dis + '>' + esc(x.text) + '</textarea>' +
+      (x.imageId ? '<img class="thumb" data-file="' + esc(x.imageId) + '" alt="提示圖片">' + (ro ? '' : '<button class="iconbtn" data-act="clearHintImg" data-i="' + i + '">移除圖片</button>') : '') +
+      (ro ? '' : '<label class="f" style="margin-top:6px">' + (x.imageId ? '換一張圖片' : '加一張圖片（可不加）') + '</label><input type="file" accept="image/*" data-upload="hintimg" data-i="' + i + '">') + '</div>' +
       '<div style="flex:1;min-width:110px"><label class="f">開始後幾秒可看</label><input type="number" min="0" data-num="1" data-f="hints.' + i + '.delaySec" value="' + esc(x.delaySec) + '"' + dis + '></div>' +
       (ro ? '' : '<div style="flex:none;min-width:0"><button class="iconbtn" data-act="delRow" data-arr="hints" data-i="' + i + '" aria-label="刪除提示">✕</button></div>') + '</div>';
   });
@@ -701,10 +704,11 @@ function previewPuzzle(p) {
   var g = 0;
   var d = modal('<div style="background:#12161b;color:#eef0f2;border-radius:12px;padding:6px 14px 14px;margin-top:22px"><div class="pcard" style="margin-top:12px"><h2>' + esc(p.title) + '</h2><div id="pvBlocks"></div></div>' +
     '<div class="pcard"><div class="gate" id="pvGate"></div><input class="pin" id="pvIn" autocomplete="off"><button class="pbtn" id="pvGo">送出</button><div class="pmsg" id="pvMsg"></div>' +
-    (p.hints || []).filter(function (x) { return String(x.text || '').trim(); }).map(function (x, i) { return '<div class="phint">提示 ' + (i + 1) + '（開始後 ' + (x.delaySec || 0) + ' 秒）：' + esc(x.text) + '</div>'; }).join('') + '</div></div>');
+    (p.hints || []).filter(function (x) { return String(x.text || '').trim() || x.imageId; }).map(function (x, i) { return '<div class="phint">提示 ' + (i + 1) + '（開始後 ' + (x.delaySec || 0) + ' 秒）：' + esc(x.text) + (x.imageId ? '<img data-file="' + esc(x.imageId) + '" alt="提示圖片">' : '') + '</div>'; }).join('') + '</div></div>');
   var setGate = function () { d.querySelector('#pvGate').textContent = gates.length > 1 ? '第 ' + (g + 1) + ' / ' + gates.length + ' 步：' + gates[g].label : '答案'; };
   setGate();
   renderPlayBlocks(d.querySelector('#pvBlocks'), (p.blocks || []).map(function (b) { return b; }), true);
+  d.querySelectorAll('.phint img[data-file]').forEach(function (el) { hydrateFiles(el.parentNode); });
   d.querySelector('#pvGo').onclick = function () {
     var v = d.querySelector('#pvIn').value, m = d.querySelector('#pvMsg');
     if (norm(v) && gates[g].answers.some(function (a) { return norm(a) === norm(v); })) {
@@ -947,7 +951,7 @@ function adminView(roomId) {
     d.puzzles.forEach(function (p, i) {
       h += '<div class="card"><h3>第 ' + (i + 1) + ' 題　' + esc(p.title) + '</h3><div class="kv"><span class="muted">負責</span><span>' + esc(p.author) + '</span><span class="muted">類型</span><span>' + kindLabel(p.kind) + '</span><span class="muted">預估</span><span>' + esc(p.estMinutes) + ' 分鐘</span><span class="muted">答案</span><span><b>' + esc(p.answer) + '</b></span></div>' +
         '<h3 style="font-size:16px;margin-top:12px">解題步驟鏈</h3><ol>' + (p.steps || []).map(function (s) { return '<li>' + esc(s.get) + ' → ' + esc(s.act) + ' → ' + esc(s.result) + (s.checkpoint ? '（中途答案：' + esc(s.checkpoint) + '）' : '') + '</li>'; }).join('') + '</ol>' +
-        '<h3 style="font-size:16px">提示</h3><ol>' + (p.hints || []).map(function (x) { return '<li>' + esc(x.text) + '（' + esc(x.delaySec) + ' 秒）</li>'; }).join('') + '</ol>' +
+        '<h3 style="font-size:16px">提示</h3><ol>' + (p.hints || []).map(function (x) { return '<li>' + esc(x.text) + '（' + esc(x.delaySec) + ' 秒）' + (x.imageId ? '<br><img class="thumb" data-file="' + esc(x.imageId) + '" alt="提示圖片">' : '') + '</li>'; }).join('') + '</ol>' +
         ((p.props || []).length ? '<h3 style="font-size:16px">道具</h3><ul>' + p.props.map(function (x) { return '<li>' + esc(x.item) + (x.place ? '：' + esc(x.place) : '') + '</li>'; }).join('') + '</ul>' : '') +
         '<div class="kv"><span class="muted">主題連結</span><span class="pre">' + esc(p.themeLink) + '</span>' + (p.scienceBasis ? '<span class="muted">科學依據</span><span class="pre">' + esc(p.scienceBasis) + '</span>' : '') + (p.reskinCheck ? '<span class="muted">換皮檢核</span><span class="pre">' + esc(p.reskinCheck) + '</span>' : '') + '</div>' +
         '<div class="btns"><button class="btn ghost sm" data-act="previewById" data-id="' + p.id + '">用玩家角度看</button></div>' +
@@ -1134,11 +1138,12 @@ function renderPlay(msg, good) {
     '<div class="gate">' + (st.gateCount > 1 ? '第 ' + (st.gate + 1) + ' / ' + st.gateCount + ' 步：' + esc(st.gateLabel) : '輸入答案') + '</div>' +
     '<input class="pin" id="ans" autocomplete="off" autocapitalize="off"><button class="pbtn" id="goBtn" data-act="answer">送出</button>' +
     '<div class="pmsg ' + (good ? 'good' : 'bad') + '" id="pmsg">' + esc(msg || '') + '</div>' +
-    st.hintsShown.map(function (t, i) { return '<div class="phint">提示 ' + (i + 1) + '：' + esc(t) + '</div>'; }).join('') +
+    st.hintsShown.map(function (t, i) { return '<div class="phint">提示 ' + (i + 1) + '：' + esc(t) + ((st.hintImgs || [])[i] ? '<img data-hint-img="' + i + '" alt="提示圖片">' : '') + '</div>'; }).join('') +
     (st.hintTotal > st.hintsShown.length ? '<button class="pbtn ghost" id="hintBtn" data-act="hint"></button>' : '') +
     (st.canSkip && st.phase === 'main' ? ' <button class="pbtn ghost" data-act="skip">跳過這題（扣 ' + st.skipMin + ' 分鐘）</button>' : '') +
     (st.phase === 'vault' ? ' <button class="pbtn ghost" data-act="skip">換下一題</button> <button class="pbtn ghost" data-act="finishVault">結束遊戲</button>' : '') +
     fragmentsHtml(st);
+  loadHintImages(st);
   var inp = document.getElementById('ans');
   inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendAnswer(); });
   tickPlay();
@@ -1233,6 +1238,21 @@ function finishVault() {
     if (ok) api('playFinish', S.play.id).then(function (r) { applyPlayState(r.state); }).catch(fail);
   });
 }
+/* 提示圖片另外抓，抓過就記住，不會每次作答都重傳 */
+function loadHintImages(st) {
+  var P = S.play;
+  P.hintImg = P.hintImg || {};
+  document.querySelectorAll('#panel img[data-hint-img]').forEach(function (img) {
+    var n = Number(img.getAttribute('data-hint-img')), key = st.puzzleId + ':' + n;
+    if (P.hintImg[key]) { img.src = P.hintImg[key]; return; }
+    api('playHintImage', P.id, n).then(function (r) {
+      if (!r.src) return;
+      P.hintImg[r.puzzleId + ':' + r.n] = r.src;
+      var el = document.querySelector('#panel img[data-hint-img="' + n + '"]');
+      if (el && st.puzzleId === r.puzzleId) el.src = r.src;
+    }).catch(function () { });
+  });
+}
 function askHint() {
   var P = S.play;
   api('playHint', P.id).then(function (r) { applyPlayState(r.state); }).catch(fail);
@@ -1313,6 +1333,16 @@ app.addEventListener('change', function (e) {
       if (!r) return;
       b.fileId = r.fileId;
       if (r.fileName) b.fileName = r.fileName;
+      toast('上傳完成');
+      S.saver.touch();
+      renderPuzzleEditor();
+    }).catch(fail);
+  }
+  if (up === 'hintimg') {
+    var hi = Number(t.getAttribute('data-i')), hp = S.puzzle;
+    uploadMedia(file, 'image', { roomId: hp.roomId, puzzleId: hp.id, label: '提示圖片' }).then(function (r) {
+      if (!hp.hints[hi]) return;
+      hp.hints[hi].imageId = r.fileId;
       toast('上傳完成');
       S.saver.touch();
       renderPuzzleEditor();
@@ -1403,6 +1433,7 @@ var ACTIONS = {
   previewById: function (el, id) { previewPuzzle(S.viewPuzzles.filter(function (p) { return p.id === id; })[0]); },
   addStory: function () { S.room.story = S.room.story || []; S.room.story.push({ text: '', imageId: '' }); S.saver.touch(); renderRoomEditor(); },
   delStory: function (el) { S.room.story.splice(Number(el.getAttribute('data-i')), 1); S.saver.touch(); renderRoomEditor(); },
+  clearHintImg: function (el) { var x = S.puzzle.hints[Number(el.getAttribute('data-i'))]; if (x) x.imageId = ''; S.saver.touch(); renderPuzzleEditor(); },
   clearImg: function (el) { setPath(S.room, el.getAttribute('data-path'), ''); S.saver.touch(); renderRoomEditor(); },
   testPlay: function () {
     var go = function () { api('startTestPlay', S.code, S.ws.room.id).then(function (intro) { S.testReturn = S.ws.mode === 'admin' ? S.ws.room.id : 'group'; enterPlay(intro); }).catch(fail); };

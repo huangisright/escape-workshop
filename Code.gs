@@ -55,7 +55,7 @@ function doGet(e) {
  */
 var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
-  'playStart', 'startTestPlay', 'playBegin', 'playState', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playHintImage', 'playRate',
+  'playStart', 'startTestPlay', 'playBegin', 'playState', 'playOpen', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playHintImage', 'playRate',
   'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
@@ -512,7 +512,7 @@ function movePuzzle(code, id, dir) {
  * ============================================================ */
 
 var ROOM_FIELDS = ['title', 'cover', 'story', 'success', 'fail', 'mindmap'];
-var ROOM_ADMIN_FIELDS = ['timeLimitMin', 'location', 'groupName', 'finale', 'skipMin'];
+var ROOM_ADMIN_FIELDS = ['timeLimitMin', 'location', 'groupName', 'finale', 'skipMin', 'mode'];
 
 function saveRoom(code, data) {
   var a = account_(code);
@@ -526,6 +526,7 @@ function saveRoom(code, data) {
     if ((data.rev || 0) !== (room.rev || 0)) return { conflict: true, room: stripRow_(room) };
     ROOM_FIELDS.forEach(function (f) { if (data[f] !== undefined) room[f] = data[f]; });
     if (a.role === 'admin') ROOM_ADMIN_FIELDS.forEach(function (f) { if (data[f] !== undefined) room[f] = data[f]; });
+    if (room.mode !== undefined) room.mode = room.mode === 'free' ? 'free' : 'linear';
     room.rev = (room.rev || 0) + 1;
     putDoc_('Rooms', room);
     return { room: room };
@@ -548,7 +549,9 @@ function blankRoom_(kind, ownerCode, title, s) {
     timeLimitMin: kind === 'teacher' ? s.teacherRoomMinutes : s.playMinutes, rev: 0,
     // 選用玩法（管理者設定）：終章碎片、跳過扣時、寶庫
     finale: { enabled: false, text: '', imageId: '', answer: '', hint: '' },
-    fragments: [], skipMin: 0, vaultIds: []
+    fragments: [], skipMin: 0, vaultIds: [],
+    // 玩法：linear 一題接一題；free 自由選題（主線各題同時開放，全部解完才逃脫或進終章）
+    mode: 'linear'
   };
 }
 function finaleOf_(room) {
@@ -852,7 +855,7 @@ function submitRoom(code) {
  * ============================================================ */
 
 var SNAP_ROOM_FIELDS = ['id', 'kind', 'title', 'groupName', 'cover', 'story', 'success', 'fail', 'timeLimitMin',
-  'finale', 'fragments', 'skipMin'];
+  'finale', 'fragments', 'skipMin', 'mode'];
 var SNAP_PUZZLE_FIELDS = ['id', 'title', 'author', 'kind', 'estMinutes', 'steps', 'blocks', 'answer', 'hints', 'props'];
 
 function makeSnapshot_(room, test) {
@@ -918,7 +921,8 @@ function introOf_(snap) {
       return String(x.text || '').trim() || x.imageId;
     }).map(mediaPage_),
     total: snap.puzzles.length, timeLimitSec: (Number(r.timeLimitMin) || settings_().playMinutes) * 60,
-    finale: finaleOn_(snap), skipMin: Number(r.skipMin) || 0, vaultTotal: (snap.vault || []).length
+    finale: finaleOn_(snap), skipMin: Number(r.skipMin) || 0, vaultTotal: (snap.vault || []).length,
+    free: isFree_(snap)
   };
 }
 
@@ -974,11 +978,73 @@ function escape_(r, snap) {
     r.st.phase = 'done';
   }
 }
+/* ---------- 自由選題模式 ----------
+ * 主線各題同時開放，玩家自己挑。每題的進度（第幾步、看了幾層提示、在這題花了多久）記在 st.ps[i]；
+ * 目前打開的題目仍然用 st.index / st.gate / st.hints / st.puzzleStart，所以作答、提示、跳過的程式不用分兩套。
+ * 換題時把目前這題的進度存回 st.ps，再載入要打開的那題；puzzleStart 往前推「已花的時間」，
+ * 所以提示倒數和解題時間只算真的停在這題的時間。答錯冷卻是全隊共用，換題躲不掉。
+ * 碎片依題目位置放（st.fragments[i]），跟解題順序無關；終章密碼照樣是碎片依位置接起來。
+ */
+function isFree_(snap) { return snap.room.mode === 'free'; }
+function psOf_(r, snap) {
+  var n = snap.puzzles.length;
+  var ps = r.st.ps || [];
+  for (var i = 0; i < n; i++) if (!ps[i]) ps[i] = { gate: 0, hints: 0, spent: 0, done: '', opened: false };
+  r.st.ps = ps;
+  return ps;
+}
+function stashPuzzle_(r, snap) {
+  var e = psOf_(r, snap)[r.st.index];
+  e.gate = r.st.gate || 0;
+  e.hints = r.st.hints || 0;
+  e.spent = Math.max(0, nowMs_() - (r.st.puzzleStart || nowMs_()));
+}
+function openPuzzle_(r, snap, i) {
+  var e = psOf_(r, snap)[i];
+  r.st.index = i;
+  r.st.gate = e.gate || 0;
+  r.st.hints = e.hints || 0;
+  r.st.puzzleStart = nowMs_() - (e.spent || 0);
+  if (!e.opened) {
+    e.opened = true;
+    logEvent_(r, snap.puzzles[i].id, 'open', '', 0);
+  }
+}
+function boardOf_(r, snap) {
+  var ps = psOf_(r, snap);
+  return snap.puzzles.map(function (p, i) {
+    return { no: i + 1, title: p.title, status: ps[i].done || (i === r.st.index ? 'current' : ps[i].opened ? 'opened' : 'new') };
+  });
+}
+
 /** 目前這關過了（解開或跳過）：往下一關走。回傳拿到的碎片（沒有就是 null） */
 function advance_(r, snap, skipped) {
   var ph = phase_(r.st);
   var fragment = null;
-  if (ph === 'main') {
+  if (ph === 'main' && isFree_(snap)) {
+    var ps = psOf_(r, snap), i0 = r.st.index;
+    ps[i0].done = skipped ? 'skipped' : 'solved';
+    ps[i0].gate = 0;
+    if (finaleOn_(snap)) {
+      fragment = String((snap.room.fragments || [])[i0] || '').trim();
+      var fr = r.st.fragments || [];
+      while (fr.length < snap.puzzles.length) fr.push(null);
+      fr[i0] = fragment;
+      r.st.fragments = fr;
+    }
+    var next = -1;
+    for (var k = 1; k <= ps.length; k++) {
+      var j = (i0 + k) % ps.length;
+      if (!ps[j].done) { next = j; break; }
+    }
+    if (next < 0) {
+      if (finaleOn_(snap)) { r.st.phase = 'finale'; resetPuzzle_(r); }
+      else escape_(r, snap);
+    } else {
+      r.st.cooldownUntil = 0;
+      openPuzzle_(r, snap, next);
+    }
+  } else if (ph === 'main') {
     if (finaleOn_(snap)) {
       fragment = String((snap.room.fragments || [])[r.st.index] || '').trim();
       r.st.fragments = (r.st.fragments || []).concat([fragment]);
@@ -1058,6 +1124,7 @@ function playBegin(playId) {
       savePlay_(r);
       var snap = loadSnapshot_(r.st.snap);
       logEvent_(r, snap.puzzles[0].id, 'begin', '', 0);
+      if (isFree_(snap)) { psOf_(r, snap)[0].opened = true; savePlay_(r); }
     }
     return stateOf_(r, null);
   });
@@ -1072,6 +1139,26 @@ function playState(playId, havePuzzleId) {
     var r2 = findPlay_(playId);
     checkTimeout_(r2);
     return stateOf_(r2, havePuzzleId);
+  });
+}
+/** 自由選題：打開第 i 題（從 0 起算）。已經解開或跳過的題目不能再開。 */
+function playOpen(playId, i) {
+  return withLock_(function () {
+    var r = findPlay_(playId);
+    checkTimeout_(r);
+    if (!active_(r)) return stateOf_(r, '*');
+    if (!r.st.startMs) throw new Error('遊戲還沒開始');
+    var snap = loadSnapshot_(r.st.snap);
+    if (!isFree_(snap) || phase_(r.st) !== 'main') throw new Error('這個密室要依序解題');
+    i = Number(i);
+    if (!(i >= 0 && i < snap.puzzles.length) || Math.floor(i) !== i) throw new Error('沒有這一題');
+    if (psOf_(r, snap)[i].done) throw new Error('這一題已經過關了');
+    if (i !== r.st.index) {
+      stashPuzzle_(r, snap);
+      openPuzzle_(r, snap, i);
+      savePlay_(r);
+    }
+    return stateOf_(r, null);
   });
 }
 function timeoutDue_(r) {
@@ -1109,16 +1196,24 @@ function stateOf_(r, havePuzzleId) {
     finale: finaleOn_(snap), fragments: r.st.fragments || [],
     skipMin: Number(snap.room.skipMin) || 0, skips: r.st.skips || 0, penaltySec: r.st.penaltySec || 0,
     vaultTotal: vault.length, vaultIndex: r.st.vi || 0, vaultSolved: r.st.vaultSolved || 0,
-    escapeSec: r.st.escapeSec === undefined ? null : r.st.escapeSec
+    escapeSec: r.st.escapeSec === undefined ? null : r.st.escapeSec,
+    free: isFree_(snap)
   };
+  if (out.free) {
+    var psx = psOf_(r, snap);
+    out.solvedCount = psx.filter(function (e) { return !!e.done; }).length;
+    if (!out.over && ph === 'main') out.board = boardOf_(r, snap);
+  }
   if (out.over) {
     if (out.escapeSec !== null) out.elapsedSec = out.escapeSec;
     var pg = r.result === 'escaped' ? snap.room.success : snap.room.fail;
     out.ending = mediaPage_(pg);
     var item = function (p, i) { return { id: p.id, no: i + 1, title: p.title }; };
-    out.rateList = r.result === 'escaped'
-      ? snap.puzzles.map(item)
-      : snap.puzzles.slice(0, Math.min(snap.puzzles.length, r.st.index + 1)).map(item);
+    if (r.result === 'escaped') out.rateList = snap.puzzles.map(item);
+    else if (out.free) {
+      var pso = psOf_(r, snap);
+      out.rateList = snap.puzzles.map(item).filter(function (q, i) { return pso[i].opened || pso[i].done || i === r.st.index; });
+    } else out.rateList = snap.puzzles.slice(0, Math.min(snap.puzzles.length, r.st.index + 1)).map(item);
     if (r.result === 'escaped' && ph === 'done') {
       vault.slice(0, Math.min(vault.length, (r.st.vi || 0) + 1)).forEach(function (p, i) {
         out.rateList.push({ id: p.id, no: i + 1, title: p.title, label: '寶庫 ' + (i + 1) });
@@ -1618,8 +1713,8 @@ function adminLive(code) {
     return r.started && new Date(r.started).getTime() > since;
   }).map(function (r) {
     var st = JSON.parse(r.state || '{}');
-    var total = 0, vaultTotal = 0;
-    try { var sn = loadSnapshot_(st.snap); total = sn.puzzles.length; vaultTotal = (sn.vault || []).length; } catch (e) { }
+    var total = 0, vaultTotal = 0, free = false;
+    try { var sn = loadSnapshot_(st.snap); total = sn.puzzles.length; vaultTotal = (sn.vault || []).length; free = isFree_(sn); } catch (e) { }
     var running = !r.result || (r.result === 'escaped' && st.phase === 'vault');
     var penalty = (Number(st.penaltySec) || 0) * 1000;
     return {
@@ -1629,7 +1724,8 @@ function adminLive(code) {
         : Math.floor(((running ? nowMs_() : new Date(r.ended).getTime()) - st.startMs + penalty) / 1000),
       hints: st.hints, wrong: st.wrong || 0,
       phase: st.phase || 'main', skips: st.skips || 0, escapeSec: st.escapeSec === undefined ? null : st.escapeSec,
-      vaultIndex: st.vi || 0, vaultSolved: st.vaultSolved || 0, vaultTotal: vaultTotal
+      vaultIndex: st.vi || 0, vaultSolved: st.vaultSolved || 0, vaultTotal: vaultTotal,
+      free: free, solvedCount: (st.ps || []).filter(function (e) { return e && e.done; }).length
     };
   }).reverse();
 }

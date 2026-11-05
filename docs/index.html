@@ -98,6 +98,8 @@ body.playing{background:#12161b;color:#eef0f2}
 .play .timer.low{color:#ff7b6b}
 .pcard{background:#1c222a;border:1px solid #2b343f;border-radius:14px;padding:20px;margin-bottom:14px}
 .pcard h2{margin:0 0 12px;font-size:24px}
+.byline{margin:-6px 0 12px;color:#f3c969;font-size:15px}
+.byline b{font-weight:700}
 .pcard .txt{white-space:pre-wrap;font-size:18px;line-height:1.75}
 .pcard img{max-width:100%;border-radius:10px;display:block;margin:10px 0}
 .pcard audio{width:100%;margin:10px 0}
@@ -1382,7 +1384,7 @@ function renderPlay(msg, good) {
   if (P.renderedPid !== st.puzzleId || !document.getElementById('blocks')) {
     app.innerHTML = '<div class="play"><div class="bar"><span id="barIdx"></span>' + (P.test ? '<span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span class="timer" id="tm">' + fmtSec(st.remainingSec) + '</span></div>' +
       '<div class="board" id="board"></div>' +
-      '<div class="pcard"><h2>' + esc(st.title) + '</h2><div id="blocks"></div></div><div class="pcard" id="panel"></div></div>';
+      '<div class="pcard"><h2>' + esc(st.title) + '</h2>' + (st.author ? '<div class="byline">✎ 設計者：<b>' + esc(st.author) + '</b></div>' : '') + '<div id="blocks"></div></div><div class="pcard" id="panel"></div></div>';
     renderPlayBlocks(document.getElementById('blocks'), P.blocks, false);
     P.renderedPid = st.puzzleId;
     window.scrollTo(0, 0);
@@ -1529,7 +1531,7 @@ function showEnding(st) {
     '<p style="color:#aab3bd">用時 ' + fmtSec(st.elapsedSec) + (st.penaltySec ? '（含跳過扣時 ' + Math.round(st.penaltySec / 60) + ' 分鐘）' : '') +
     (st.vaultTotal && st.result === 'escaped' ? '　寶庫寶物 ' + st.vaultSolved + ' / ' + st.vaultTotal + ' 件' : '') + '</p></div>';
   h += '<div class="pcard"><h2>幫每一題評難易度</h2><p style="color:#aab3bd">1 顆星最容易，5 顆星最難。</p>' + (st.rateList || []).map(function (q) {
-    return '<div style="margin:10px 0"><div>' + esc(q.label || '第 ' + q.no + ' 題') + '　' + esc(q.title) + '</div><div class="stars">' + [1, 2, 3, 4, 5].map(function (v) {
+    return '<div style="margin:10px 0"><div>' + esc(q.label || '第 ' + q.no + ' 題') + '　' + esc(q.title) + (q.author ? '<span class="byline" style="margin:0 0 0 8px">✎ ' + esc(q.author) + '</span>' : '') + '</div><div class="stars">' + [1, 2, 3, 4, 5].map(function (v) {
       return '<button data-act="star" data-pid="' + esc(q.id) + '" data-v="' + v + '" aria-label="' + v + ' 顆星">★</button>';
     }).join('') + '</div></div>';
   }).join('') +

@@ -1217,7 +1217,7 @@ function stateOf_(r, havePuzzleId) {
     if (out.escapeSec !== null) out.elapsedSec = out.escapeSec;
     var pg = r.result === 'escaped' ? snap.room.success : snap.room.fail;
     out.ending = mediaPage_(pg);
-    var item = function (p, i) { return { id: p.id, no: i + 1, title: p.title }; };
+    var item = function (p, i) { return { id: p.id, no: i + 1, title: p.title, author: p.author || '' }; };
     if (r.result === 'escaped') out.rateList = snap.puzzles.map(item);
     else if (out.free) {
       var pso = psOf_(r, snap);
@@ -1225,7 +1225,7 @@ function stateOf_(r, havePuzzleId) {
     } else out.rateList = snap.puzzles.slice(0, Math.min(snap.puzzles.length, r.st.index + 1)).map(item);
     if (r.result === 'escaped' && ph === 'done') {
       vault.slice(0, Math.min(vault.length, (r.st.vi || 0) + 1)).forEach(function (p, i) {
-        out.rateList.push({ id: p.id, no: i + 1, title: p.title, label: '寶庫 ' + (i + 1) });
+        out.rateList.push({ id: p.id, no: i + 1, title: p.title, author: p.author || '', label: '寶庫 ' + (i + 1) });
       });
     }
     return out;
@@ -1236,6 +1236,7 @@ function stateOf_(r, havePuzzleId) {
   var visibleHints = hintsOf_(p);
   out.puzzleId = p.id;
   out.title = p.title;
+  out.author = p.author || '';
   out.gate = r.st.gate;
   out.gateCount = gates.length;
   out.gateLabel = gates[r.st.gate].label;

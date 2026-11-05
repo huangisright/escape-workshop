@@ -163,3 +163,18 @@ test('一題接一題的密室不能跳題', () => {
   assert.equal(p.st.board, undefined);
   assert.throws(() => env.gs.playOpen(p.id, 1), /依序/);
 });
+
+test('創作者署名：玩家看得到每題設計者，結束畫面的題目清單也有', () => {
+  const env = H.load();
+  const { room } = H.publishedTeacherRoom(env, ['ONE', 'TWO']);
+  let p = H.startPlay(env, room.playCode);
+  assert.ok(p.st.author, '題目畫面要帶設計者');
+  let st = p.st;
+  for (const ans of ['ONE', 'TWO']) {
+    if (st.board) st = env.plain(env.gs.playOpen(p.id, ['ONE', 'TWO'].indexOf(ans)));
+    st = env.plain(env.gs.playAnswer(p.id, ans)).state || st;
+  }
+  const end = env.plain(env.gs.playState(p.id, ''));
+  assert.equal(end.over, true, '兩題都解完應該結束');
+  assert.ok(end.rateList.length && end.rateList.every((q) => q.author), '結束清單每題都有設計者');
+});

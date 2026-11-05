@@ -22,20 +22,49 @@ function freeRoom(env, opts) {
   return { room: pub, puzzles };
 }
 
-test('設定：只有管理者能改玩法，亂填的值當成一題接一題', () => {
+test('設定：預設自由選題＋小島；設計者（分組）也能改玩法與地圖；亂填的值回到預設', () => {
   const env = H.load();
   const room = env.plain(env.gs.adminCreateTeacherRoom(env.admin, 'X'));
-  assert.equal(room.mode, 'linear');
+  assert.equal(room.mode, 'free');
+  assert.equal(room.theme, 'island');
   let r = env.plain(env.gs.getRoom(env.admin, room.id));
-  r = env.plain(env.gs.saveRoom(env.admin, { id: room.id, rev: r.rev, mode: 'whatever' })).room;
-  assert.equal(r.mode, 'linear');
-  r = env.plain(env.gs.saveRoom(env.admin, { id: room.id, rev: r.rev, mode: 'free' })).room;
+  r = env.plain(env.gs.saveRoom(env.admin, { id: room.id, rev: r.rev, mode: 'whatever', theme: 'moon' })).room;
   assert.equal(r.mode, 'free');
+  assert.equal(r.theme, 'island');
+  r = env.plain(env.gs.saveRoom(env.admin, { id: room.id, rev: r.rev, mode: 'linear', theme: 'jigsaw' })).room;
+  assert.equal(r.mode, 'linear');
+  assert.equal(r.theme, 'jigsaw');
 
   const g = env.plain(env.gs.adminCreateGroups(env.admin, [{ name: 'A', members: '甲' }]))[0];
   const gr = env.plain(env.gs.getRoom(g.code));
-  env.gs.saveRoom(g.code, { id: gr.id, rev: gr.rev, mode: 'free' });
-  assert.notEqual(env.plain(env.gs.getRoom(g.code)).mode, 'free', '分組不能自己改玩法');
+  assert.equal(gr.mode, 'free');
+  env.gs.saveRoom(g.code, { id: gr.id, rev: gr.rev, mode: 'linear', theme: 'planet' });
+  const after = env.plain(env.gs.getRoom(g.code));
+  assert.equal(after.mode, 'linear');
+  assert.equal(after.theme, 'planet');
+});
+
+test('沒設過玩法的舊密室：重新發布後是自由選題；已發布的舊快照照舊一題接一題', () => {
+  const env = H.load();
+  const { room } = H.publishedTeacherRoom(env, ['ONE', 'TWO']);
+  // 模擬這個欄位出現前就存在的密室與快照
+  const snapRow = env.mock.sheetRows('Snapshots')[0];
+  const file = env.mock.files[snapRow[3]];
+  const snap = JSON.parse(file.blob.getDataAsString());
+  delete snap.room.mode; delete snap.room.theme;
+  file.blob = env.gs.Utilities.newBlob(JSON.stringify(snap), 'application/json', file.name);
+  env.gs.CacheService.getScriptCache().remove('snap:' + snapRow[1]);
+  let p = H.startPlay(env, room.playCode);
+  assert.equal(p.st.free, false, '舊快照不受影響');
+
+  const doc = env.gs.getDoc_('Rooms', room.id);
+  delete doc.mode; delete doc.theme;
+  env.gs.putDoc_('Rooms', doc);
+  const pub = env.plain(env.gs.adminRoomAction(env.admin, room.id, 'publish'));
+  p = H.startPlay(env, pub.playCode);
+  assert.equal(p.st.free, true);
+  assert.equal(p.st.theme, 'island');
+  assert.equal(p.intro.theme, 'island');
 });
 
 test('自由選題：任意順序、碎片照位置放、換題保留進度、提示只算停在這題的時間', () => {

@@ -125,6 +125,23 @@ body.playing{background:#12161b;color:#eef0f2}
 .prow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .frag-in{width:70px!important;text-align:center}
 .board{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.map{margin:0 0 14px}
+.map svg{display:block;width:100%;height:auto;border-radius:16px}
+.map .mlabel{font-size:24px;font-weight:700;fill:#fff;paint-order:stroke;stroke:#000a;stroke-width:5px;stroke-linejoin:round}
+.map .mtitle{font-size:20px;fill:#d7dde3;paint-order:stroke;stroke:#000a;stroke-width:4px}
+.map .mmark{font-size:40px;font-weight:800;fill:#5b6b7a}
+.map .msmall{font-size:20px;font-weight:700;fill:#fff;paint-order:stroke;stroke:#000a;stroke-width:4px}
+.map .mcheck{font-size:20px;font-weight:800;fill:#1b1b1b}
+.map .mnode{cursor:pointer}
+.map .mnode:hover{filter:brightness(1.18)}
+.map .mnode:focus{outline:none}
+.map .mnode:focus-visible .hit{stroke:#fff;stroke-width:5}
+.maphint{display:flex;gap:10px;align-items:center;color:#9aa4ae;font-size:14px;margin-top:6px}
+.maphint button{background:none;border:0;color:#f3c969;font-size:14px;cursor:pointer;padding:4px 0;white-space:nowrap}
+.themes{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px}
+.themes button{padding:8px 16px;border-radius:10px;border:1px solid var(--line, #ccc);background:#fff;cursor:pointer;font-size:15px}
+.themes button.on{border-color:var(--acc);background:var(--acc);color:#fff}
+.mapprev{max-width:560px}
 .board button{min-width:64px;min-height:48px;padding:6px 12px;border-radius:12px;border:1px solid #3a4552;background:#1d232b;color:#eef0f2;font-size:16px;cursor:pointer;text-align:left;line-height:1.3}
 .board button small{display:block;font-size:12px;color:#9aa4ae;max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .board button.cur{border-color:#f3c969;background:#3a3220;color:#f3c969}
@@ -771,10 +788,9 @@ function renderRoomEditor() {
   S.view = 'room';
   var h = topbar('密室資訊' + (ro ? '（唯讀）' : ''), { back: 'backRoom', status: !ro }) + '<div class="wrap">';
   h += '<div class="card"><h3>密室名稱</h3><input type="text" data-f="title" value="' + esc(r.title) + '"' + dis + '>';
-  if (admin) h += '<div class="row"><div><label class="f">遊玩時間（分鐘）</label><input type="number" data-num="1" data-f="timeLimitMin" value="' + esc(r.timeLimitMin) + '"></div><div><label class="f">教室／地點</label><input type="text" data-f="location" value="' + esc(r.location) + '"></div></div>' +
-    '<label class="f">玩法</label><select data-f="mode"><option value="linear"' + (r.mode !== 'free' ? ' selected' : '') + '>一題接一題（解開才看到下一題）</option><option value="free"' + (r.mode === 'free' ? ' selected' : '') + '>自由選題（所有題目同時開放，全部過關才逃脫）</option></select>' +
-    '<p class="help">自由選題適合各題互不相依的密室；如果某一題要用到別題的答案或道具，請用一題接一題。改了玩法要「更新發布版本」才會生效。</p>';
+  if (admin) h += '<div class="row"><div><label class="f">遊玩時間（分鐘）</label><input type="number" data-num="1" data-f="timeLimitMin" value="' + esc(r.timeLimitMin) + '"></div><div><label class="f">教室／地點</label><input type="text" data-f="location" value="' + esc(r.location) + '"></div></div>' ;
   h += '</div>';
+  h += playModeHtml(r, ro);
   h += '<div class="card"><h3>封面</h3>' + mediaPageHtml('cover', r.cover, '封面', ro) + '</div>';
   h += '<div class="card"><h3>說明頁（1～3 頁，講故事、交代任務）</h3>';
   (r.story || []).forEach(function (pg, i) {
@@ -793,6 +809,44 @@ function renderRoomEditor() {
   }
   app.innerHTML = h + '</div>';
   hydrateFiles();
+  renderMapPreview();
+}
+/** 玩法與地圖（設計者自己選）：預設自由選題＋小島 */
+function playModeHtml(r, ro) {
+  var dis = ro ? ' disabled' : '', free = r.mode !== 'linear', theme = MAP_THEMES[r.theme] ? r.theme : 'island';
+  var h = '<div class="card"><h3>玩法與地圖</h3>';
+  h += '<select data-f="mode"' + dis + '><option value="free"' + (free ? ' selected' : '') + '>自由選題：所有題目同時開放，玩家自己挑順序（預設）</option>' +
+    '<option value="linear"' + (free ? '' : ' selected') + '>一題接一題：解開才看到下一題</option></select>';
+  h += '<p class="help">' + (free ? '全部題目都過關才逃脫。如果某一題要用到別題的答案或道具，請改成一題接一題。'
+    : '題目順序就是清單上的順序。適合題目之間有先後關係的密室，例如 A 題的鎖盒裡放著 B 題的道具。') + '改完要重新發布（或「更新發布版本」）才會生效。</p>';
+  if (free) {
+    h += '<label class="f">地圖樣式</label><div class="themes">' + Object.keys(MAP_THEMES).map(function (k) {
+      return '<button type="button" class="' + (k === theme ? 'on' : '') + '" data-act="setTheme" data-t="' + k + '"' + dis + ' aria-pressed="' + (k === theme) + '">' + MAP_THEMES[k] + '</button>';
+    }).join('') + '</div>';
+    h += '<p class="help">' + (theme === 'jigsaw' ? '拼圖會慢慢拼出「封面」的圖片，記得上傳封面圖。' : theme === 'list' ? '只有一排題號按鈕，最省空間。' : MAP_HINTS[theme]) + '下面是預覽（假設第 1 題解開、正在看第 2 題）。</p>';
+    h += '<div class="map mapprev" id="mapPreview"></div>';
+  }
+  return h + '</div>';
+}
+function renderMapPreview() {
+  var el = document.getElementById('mapPreview'), r = S.room;
+  if (!el || !r) return;
+  var theme = MAP_THEMES[r.theme] ? r.theme : 'island';
+  var n = Math.max(3, Math.min(12, (r.puzzleIds || []).length || (S.ws && S.ws.puzzles || []).length || 5));
+  var board = [];
+  for (var i = 0; i < n; i++) board.push({ no: i + 1, title: '題目 ' + (i + 1), status: i === 0 ? 'solved' : i === 1 ? 'current' : i === 2 ? 'opened' : 'new' });
+  var draw = function (img) {
+    var m = mapHtml(board, theme, { image: img, uid: 'pv' });
+    el.innerHTML = m || boardHtml({ board: board });
+    el.className = m ? 'map mapprev' : 'board';
+    el.style.background = m ? '' : '#14181d';
+    el.style.padding = m ? '' : '10px';
+    el.style.borderRadius = '16px';
+    el.style.pointerEvents = 'none';
+  };
+  draw(null);
+  var imgId = theme === 'jigsaw' && r.cover && r.cover.imageId;
+  if (imgId) fileData(imgId).then(function (d) { if (document.getElementById('mapPreview') === el && d.dataUrl) draw(d.dataUrl); }).catch(function () { });
 }
 /** 選用玩法（只有管理者看得到）：跳過扣時、終章碎片。碎片與寶庫在「挑題與排序」設定。 */
 function optionalPlayHtml(r) {
@@ -897,7 +951,7 @@ function adminBankHtml(d) {
 }
 function playExtrasText(r) {
   var x = [];
-  if (r.mode === 'free') x.push('自由選題');
+  x.push(r.mode === 'linear' ? '一題接一題' : '自由選題・' + (MAP_THEMES[r.theme] || '小島'));
   if (r.finale && r.finale.enabled) x.push('終章碎片');
   if (Number(r.skipMin) > 0) x.push('跳過扣 ' + r.skipMin + ' 分');
   if ((r.vaultIds || []).length) x.push('寶庫 ' + r.vaultIds.length + ' 題');
@@ -971,9 +1025,9 @@ function adminView(roomId) {
         '<h3 style="font-size:16px;margin-top:12px">檢核</h3>' + checksHtml(p.checks) + '</div>';
     });
     var fin = r.finale || {};
-    if (fin.enabled || Number(r.skipMin) > 0 || r.mode === 'free') {
+    if (true) {
       h += '<div class="card"><h3>選用玩法</h3><div class="kv">' +
-        '<span class="muted">玩法</span><span>' + (r.mode === 'free' ? '自由選題' : '一題接一題') + '</span>' +
+        '<span class="muted">玩法</span><span>' + (r.mode === 'linear' ? '一題接一題' : '自由選題（' + (MAP_THEMES[r.theme] || '小島') + '地圖）') + '</span>' +
         '<span class="muted">跳過</span><span>' + (Number(r.skipMin) > 0 ? '扣 ' + esc(r.skipMin) + ' 分鐘' : '不能跳過') + '</span>' +
         (fin.enabled ? '<span class="muted">碎片</span><span>' + d.puzzles.map(function (p, i) { return (i + 1) + '：' + esc((r.fragments || [])[i] || '（沒設）'); }).join('　') + '</span>' +
           '<span class="muted">終章密碼</span><span><b>' + esc(fin.answer || (r.fragments || []).slice(0, d.puzzles.length).join('')) + '</b>' + (fin.answer ? '' : '（碎片依序）') + '</span>' +
@@ -1136,7 +1190,173 @@ function fragmentsHtml(st) {
   }
   return h + '</div>';
 }
-/** 自由選題的選題板：已過的題目不能再開 */
+/* ============================================================
+   自由選題的地圖：小島、拼圖、星球（清單 = 原本的按鈕列）
+   board：[{ no, title, status }]，status = new / opened / current / solved / skipped
+   ============================================================ */
+var MAP_THEMES = { island: '小島', jigsaw: '拼圖', planet: '星球', list: '清單' };
+var MAP_HINTS = {
+  island: '點一座小島換題目。插上旗子的是已經解開的島，霧裡的島還沒去過。',
+  jigsaw: '點一塊拼圖換題目。每解開一題就拼上一塊，全部解開就拼出完整的圖。',
+  planet: '點一顆星球換題目。發光的是已經解開的星球，暗的還沒去過。',
+  list: ''
+};
+var MAP_W = 800;
+function mapRnd(i, k) { var x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); }
+function mapShort(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
+function mapNum(v) { return Math.round(v * 10) / 10; }
+function mapClickable(b) { return b.status === 'new' || b.status === 'opened'; }
+function mapStatusText(b) {
+  return { solved: '，已解開', skipped: '，已跳過', current: '，目前這題', opened: '，去過還沒解開', 'new': '，還沒去過' }[b.status] || '';
+}
+/** 每個節點外面包一層：可以點的就是按鈕 */
+function mapNode(b, i, inner) {
+  var label = '第 ' + b.no + ' 題 ' + b.title + mapStatusText(b);
+  if (mapClickable(b)) return '<g class="mnode" role="button" tabindex="0" data-act="openQ" data-i="' + i + '" aria-label="' + esc(label) + '"><title>' + esc(label) + '</title>' + inner + '</g>';
+  return '<g role="img" aria-label="' + esc(label) + '"' + (b.status === 'current' ? ' aria-current="true"' : '') + '><title>' + esc(label) + '</title>' + inner + '</g>';
+}
+function mapLabel(x, y, b, n) {
+  return '<text class="mlabel" x="' + mapNum(x) + '" y="' + mapNum(y) + '" text-anchor="middle">' + esc(b.no + '. ' + mapShort(b.title, n || 6)) + '</text>';
+}
+/** 小島、星球共用的散落排列 */
+function mapScatter(n) {
+  var cols = n <= 3 ? n : n === 4 ? 2 : n <= 6 ? 3 : 4, rows = Math.ceil(n / cols);
+  var cw = MAP_W / cols, ch = 215, R = Math.min(cw * 0.27, 68), pos = [];
+  for (var i = 0; i < n; i++) {
+    var r = Math.floor(i / cols), c = i % cols;
+    var inRow = r === rows - 1 ? n - r * cols : cols;
+    var x = (cols - inRow) * cw / 2 + (c + 0.5) * cw + (mapRnd(i, 1) - 0.5) * cw * 0.22;
+    var y = r * ch + 100 + (mapRnd(i, 2) - 0.5) * 34 + (c % 2 ? 14 : -8);
+    pos.push({ x: x, y: y });
+  }
+  return { pos: pos, R: R, H: rows * ch + 30 };
+}
+function mapBlob(cx, cy, rx, ry, seed) {
+  var pts = [];
+  for (var k = 0; k < 9; k++) {
+    var a = k / 9 * Math.PI * 2, f = 0.82 + 0.3 * mapRnd(seed, k + 5);
+    pts.push([cx + Math.cos(a) * rx * f, cy + Math.sin(a) * ry * f]);
+  }
+  var mid = function (p, q) { return [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; };
+  var m0 = mid(pts[8], pts[0]), d = 'M' + mapNum(m0[0]) + ' ' + mapNum(m0[1]);
+  for (var j = 0; j < 9; j++) {
+    var m = mid(pts[j], pts[(j + 1) % 9]);
+    d += ' Q' + mapNum(pts[j][0]) + ' ' + mapNum(pts[j][1]) + ' ' + mapNum(m[0]) + ' ' + mapNum(m[1]);
+  }
+  return d + 'Z';
+}
+function mapIsland(board) {
+  var L = mapScatter(board.length), R = L.R, h = '';
+  h += '<rect width="' + MAP_W + '" height="' + L.H + '" fill="#1b5b82"/>';
+  for (var w = 0; w < 18; w++) {
+    var wx = mapRnd(w, 7) * (MAP_W - 40) + 20, wy = mapRnd(w, 8) * (L.H - 20) + 10;
+    h += '<path d="M' + mapNum(wx) + ' ' + mapNum(wy) + ' q8 -6 16 0 t16 0" fill="none" stroke="#ffffff30" stroke-width="2"/>';
+  }
+  board.forEach(function (b, i) {
+    var p = L.pos[i], x = p.x, y = p.y, g = '', grey = b.status === 'skipped';
+    if (b.status === 'current') g += '<ellipse cx="' + mapNum(x) + '" cy="' + mapNum(y + 6) + '" rx="' + mapNum(R * 1.62) + '" ry="' + mapNum(R * 1.15) + '" fill="none" stroke="#f3c969" stroke-width="5" stroke-dasharray="14 9"/>';
+    g += '<ellipse cx="' + mapNum(x) + '" cy="' + mapNum(y + 6) + '" rx="' + mapNum(R * 1.42) + '" ry="' + mapNum(R * 1.0) + '" fill="#3d8fb8" opacity=".55"/>';
+    g += '<path d="' + mapBlob(x, y + 6, R * 1.15, R * 0.78, i) + '" fill="' + (grey ? '#a3a7ab' : '#e8d29a') + '"/>';
+    g += '<path d="' + mapBlob(x - R * 0.08, y - 2, R * 0.78, R * 0.5, i + 31) + '" fill="' + (grey ? '#6f767d' : '#4f9a55') + '"/>';
+    if (!grey) g += '<circle cx="' + mapNum(x + R * 0.38) + '" cy="' + mapNum(y - R * 0.12) + '" r="' + mapNum(R * 0.16) + '" fill="#3c7f43"/>';
+    if (b.status === 'solved') {
+      g += '<line x1="' + mapNum(x + R * 0.05) + '" y1="' + mapNum(y + R * 0.1) + '" x2="' + mapNum(x + R * 0.05) + '" y2="' + mapNum(y - R * 1.05) + '" stroke="#5a3d22" stroke-width="4"/>';
+      g += '<path d="M' + mapNum(x + R * 0.05) + ' ' + mapNum(y - R * 1.05) + ' l' + mapNum(R * 0.62) + ' ' + mapNum(R * 0.2) + ' l' + mapNum(-R * 0.62) + ' ' + mapNum(R * 0.2) + 'Z" fill="#f3c969"/>';
+    }
+    if (b.status === 'new') {
+      g += '<ellipse cx="' + mapNum(x) + '" cy="' + mapNum(y + 2) + '" rx="' + mapNum(R * 1.35) + '" ry="' + mapNum(R * 0.95) + '" fill="#dfe7ee" opacity=".8"/>';
+      g += '<text class="mmark" x="' + mapNum(x) + '" y="' + mapNum(y + 14) + '" text-anchor="middle">?</text>';
+    }
+    if (grey) g += '<text class="msmall" x="' + mapNum(x) + '" y="' + mapNum(y + 10) + '" text-anchor="middle">跳過</text>';
+    g += '<ellipse class="hit" cx="' + mapNum(x) + '" cy="' + mapNum(y + 6) + '" rx="' + mapNum(R * 1.45) + '" ry="' + mapNum(R * 1.05) + '" fill="transparent"/>';
+    g += mapLabel(x, y + R * 1.05 + 36, b);
+    h += mapNode(b, i, g);
+  });
+  return { svg: h, H: L.H };
+}
+var PLANET_COLORS = ['#e07a5f', '#81b29a', '#f2cc8f', '#6d9dc5', '#c08bd6', '#e5989b', '#70c1b3', '#ffb703', '#8ecae6', '#b5838d', '#90be6d', '#f4a261'];
+function mapPlanet(board) {
+  var L = mapScatter(board.length), R = L.R, h = '';
+  h += '<rect width="' + MAP_W + '" height="' + L.H + '" fill="#0d1020"/>';
+  for (var s = 0; s < 70; s++) {
+    h += '<circle cx="' + mapNum(mapRnd(s, 11) * MAP_W) + '" cy="' + mapNum(mapRnd(s, 12) * L.H) + '" r="' + mapNum(0.6 + mapRnd(s, 13) * 1.6) + '" fill="#fff" opacity="' + mapNum(0.3 + mapRnd(s, 14) * 0.6) + '"/>';
+  }
+  board.forEach(function (b, i) {
+    var p = L.pos[i], x = p.x, y = p.y, r = R * 0.8, g = '';
+    var col = b.status === 'skipped' ? '#5b6470' : PLANET_COLORS[i % PLANET_COLORS.length];
+    var op = b.status === 'new' ? 0.35 : b.status === 'opened' ? 0.7 : 1;
+    if (b.status === 'solved') g += '<circle cx="' + mapNum(x) + '" cy="' + mapNum(y) + '" r="' + mapNum(r * 1.45) + '" fill="' + col + '" opacity=".22"/><circle cx="' + mapNum(x) + '" cy="' + mapNum(y) + '" r="' + mapNum(r * 1.2) + '" fill="' + col + '" opacity=".3"/>';
+    if (b.status === 'current') g += '<circle cx="' + mapNum(x) + '" cy="' + mapNum(y) + '" r="' + mapNum(r * 1.42) + '" fill="none" stroke="#f3c969" stroke-width="4" stroke-dasharray="12 8"/>';
+    g += '<g opacity="' + op + '">';
+    g += '<circle cx="' + mapNum(x) + '" cy="' + mapNum(y) + '" r="' + mapNum(r) + '" fill="' + col + '"/>';
+    if (i % 2 === 0) g += '<path d="M' + mapNum(x - r * 0.92) + ' ' + mapNum(y + r * 0.2) + ' Q' + mapNum(x) + ' ' + mapNum(y + r * 0.45) + ' ' + mapNum(x + r * 0.92) + ' ' + mapNum(y + r * 0.2) + '" fill="none" stroke="#00000030" stroke-width="' + mapNum(r * 0.16) + '"/>';
+    g += '<circle cx="' + mapNum(x + r * 0.25) + '" cy="' + mapNum(y + r * 0.25) + '" r="' + mapNum(r * 0.78) + '" fill="#000" opacity=".18"/>';
+    g += '<circle cx="' + mapNum(x - r * 0.35) + '" cy="' + mapNum(y - r * 0.35) + '" r="' + mapNum(r * 0.22) + '" fill="#fff" opacity=".3"/>';
+    if (i % 3 === 1) g += '<ellipse cx="' + mapNum(x) + '" cy="' + mapNum(y) + '" rx="' + mapNum(r * 1.55) + '" ry="' + mapNum(r * 0.36) + '" fill="none" stroke="#f6e3b3" stroke-width="5" opacity=".75" transform="rotate(-14 ' + mapNum(x) + ' ' + mapNum(y) + ')"/>';
+    g += '</g>';
+    if (b.status === 'new') g += '<text class="mmark" x="' + mapNum(x) + '" y="' + mapNum(y + 14) + '" text-anchor="middle">?</text>';
+    if (b.status === 'solved') g += '<circle cx="' + mapNum(x + r * 0.8) + '" cy="' + mapNum(y - r * 0.8) + '" r="17" fill="#f3c969"/><text class="mcheck" x="' + mapNum(x + r * 0.8) + '" y="' + mapNum(y - r * 0.8 + 7) + '" text-anchor="middle">✓</text>';
+    if (b.status === 'skipped') g += '<text class="msmall" x="' + mapNum(x) + '" y="' + mapNum(y + 8) + '" text-anchor="middle">跳過</text>';
+    g += '<circle class="hit" cx="' + mapNum(x) + '" cy="' + mapNum(y) + '" r="' + mapNum(r * 1.45) + '" fill="transparent"/>';
+    g += mapLabel(x, y + R * 1.05 + 34, b);
+    h += mapNode(b, i, g);
+  });
+  return { svg: h, H: L.H };
+}
+/** 拼圖：相鄰兩塊的凸凹一定對得上；解開（或跳過）的塊顯示封面圖的那一部分 */
+function mapJigsaw(board, image, uid) {
+  var n = board.length;
+  var cols = n <= 2 ? n : n <= 4 ? 2 : n <= 6 ? 3 : n <= 12 ? 4 : 5, rows = Math.ceil(n / cols);
+  var s = Math.min((MAP_W - 80) / cols, 170), gw = cols * s, ox = (MAP_W - gw) / 2, oy = 46;
+  var H = rows * s + oy * 2;
+  var has = function (r, c) { return r >= 0 && c >= 0 && c < cols && r * cols + c < n; };
+  var hs = function (r, c) { return mapRnd(r * 7 + c, 3) > 0.5 ? 1 : -1; };
+  var vs = function (r, c) { return mapRnd(r * 7 + c, 4) > 0.5 ? 1 : -1; };
+  var P = function (ax, ay, dx, dy, sg, t, k) {
+    return mapNum(ax + dx * t + dy * k * sg) + ' ' + mapNum(ay + dy * t - dx * k * sg);
+  };
+  var edge = function (ax, ay, bx, by, sg) {
+    if (!sg) return ' L' + mapNum(bx) + ' ' + mapNum(by);
+    var dx = bx - ax, dy = by - ay;
+    var q = function (t, k) { return P(ax, ay, dx, dy, sg, t, k); };
+    return ' L' + q(0.34, 0) + ' C' + q(0.44, 0) + ' ' + q(0.3, 0.24) + ' ' + q(0.5, 0.24) +
+      ' C' + q(0.7, 0.24) + ' ' + q(0.56, 0) + ' ' + q(0.66, 0) + ' L' + mapNum(bx) + ' ' + mapNum(by);
+  };
+  var piece = function (r, c) {
+    var x = ox + c * s, y = oy + r * s;
+    var top = has(r - 1, c) ? -vs(r - 1, c) : 0, right = has(r, c + 1) ? hs(r, c) : 0;
+    var bottom = has(r + 1, c) ? vs(r, c) : 0, left = c > 0 ? -hs(r, c - 1) : 0;
+    return 'M' + mapNum(x) + ' ' + mapNum(y) + edge(x, y, x + s, y, top) + edge(x + s, y, x + s, y + s, right) +
+      edge(x + s, y + s, x, y + s, bottom) + edge(x, y + s, x, y, left) + 'Z';
+  };
+  var paths = board.map(function (b, i) { return piece(Math.floor(i / cols), i % cols); });
+  var done = board.map(function (b) { return b.status === 'solved' || b.status === 'skipped'; });
+  var h = '<rect width="' + MAP_W + '" height="' + H + '" fill="#241b2f"/>';
+  h += '<defs><clipPath id="' + uid + '-clip">' + paths.filter(function (p, i) { return done[i]; }).map(function (p) { return '<path d="' + p + '"/>'; }).join('') + '</clipPath></defs>';
+  if (image && done.some(Boolean)) h += '<image href="' + image + '" x="' + mapNum(ox) + '" y="' + mapNum(oy) + '" width="' + mapNum(gw) + '" height="' + mapNum(rows * s) + '" preserveAspectRatio="xMidYMid slice" clip-path="url(#' + uid + '-clip)"/>';
+  board.forEach(function (b, i) {
+    var r = Math.floor(i / cols), c = i % cols, cx = ox + (c + 0.5) * s, cy = oy + (r + 0.5) * s, g = '';
+    var fill = done[i] ? (image ? 'transparent' : PLANET_COLORS[i % PLANET_COLORS.length]) : b.status === 'current' ? '#3a3220' : b.status === 'opened' ? '#3a4552' : '#2b343f';
+    g += '<path class="hit" d="' + paths[i] + '" fill="' + fill + '" stroke="' + (b.status === 'current' ? '#f3c969' : '#0b0e12') + '" stroke-width="' + (b.status === 'current' ? 5 : 2.5) + '"/>';
+    if (b.status === 'skipped') g += '<path d="' + paths[i] + '" fill="#0b0e12" opacity=".55"/><text class="msmall" x="' + mapNum(cx) + '" y="' + mapNum(cy + 8) + '" text-anchor="middle">跳過</text>';
+    if (b.status === 'solved') g += '<circle cx="' + mapNum(cx + s * 0.3) + '" cy="' + mapNum(cy - s * 0.3) + '" r="15" fill="#f3c969"/><text class="mcheck" x="' + mapNum(cx + s * 0.3) + '" y="' + mapNum(cy - s * 0.3 + 6) + '" text-anchor="middle">✓</text>';
+    if (!done[i]) {
+      g += '<text class="mlabel" x="' + mapNum(cx) + '" y="' + mapNum(cy - 4) + '" text-anchor="middle">第 ' + b.no + ' 題</text>';
+      g += '<text class="mtitle" x="' + mapNum(cx) + '" y="' + mapNum(cy + 26) + '" text-anchor="middle">' + esc(mapShort(b.title, 6)) + '</text>';
+    }
+    h += mapNode(b, i, g);
+  });
+  return { svg: h, H: H };
+}
+/** 回傳地圖的 HTML；清單樣式回傳 null（由呼叫端畫原本的按鈕列） */
+function mapHtml(board, theme, opts) {
+  opts = opts || {};
+  if (!board || !board.length || theme === 'list' || !MAP_THEMES[theme]) return null;
+  var m = theme === 'jigsaw' ? mapJigsaw(board, opts.image, opts.uid || 'mp') : theme === 'planet' ? mapPlanet(board) : mapIsland(board);
+  return '<svg viewBox="0 0 ' + MAP_W + ' ' + mapNum(m.H) + '" role="group" aria-label="' + esc(MAP_THEMES[theme]) + '地圖">' + m.svg + '</svg>';
+}
+
+/** 自由選題的選題板（清單樣式）：已過的題目不能再開 */
 function boardHtml(st) {
   if (!st.board) return '';
   return st.board.map(function (b, i) {
@@ -1169,7 +1389,12 @@ function renderPlay(msg, good) {
   }
   document.getElementById('barIdx').textContent = playLabel(st);
   var bd = document.getElementById('board');
-  bd.innerHTML = boardHtml(st);
+  var theme = st.theme || 'island', cover = P.intro && P.intro.cover;
+  var map = st.board && !P.mapHidden ? mapHtml(st.board, theme, { image: cover && cover.image, uid: 'pm' }) : null;
+  bd.className = map || (st.board && P.mapHidden && theme !== 'list') ? 'map' : 'board';
+  bd.innerHTML = map ? map + '<div class="maphint"><span style="flex:1">' + esc(MAP_HINTS[theme] || '') + '</span><button type="button" data-act="toggleMap">收起地圖</button></div>'
+    : st.board && P.mapHidden && theme !== 'list' ? '<div class="maphint"><span style="flex:1">已過 ' + (st.solvedCount || 0) + ' / ' + st.total + ' 題</span><button type="button" data-act="toggleMap">打開' + esc(MAP_THEMES[theme]) + '地圖</button></div>'
+    : boardHtml(st);
   bd.style.display = st.board ? '' : 'none';
   document.getElementById('panel').innerHTML =
     (st.phase === 'vault' ? '<div class="vaultnote">你們已經逃出來了！逃脫時間 ' + fmtSec(st.escapeSec) + '。寶庫拿到 ' + st.vaultSolved + ' 件寶物，想停就停，不影響逃脫時間。</div>' : '') +
@@ -1351,6 +1576,7 @@ app.addEventListener('change', function (e) {
   if (t.tagName === 'SELECT' && t.getAttribute('data-f') && S.saver) {
     setPath(S.target === 'room' ? S.room : S.puzzle, t.getAttribute('data-f'), t.value);
     S.saver.touch();
+    if (S.target === 'room' && t.getAttribute('data-f') === 'mode') renderRoomEditor();
     return;
   }
   var up = t.getAttribute('data-upload');
@@ -1505,6 +1731,8 @@ var ACTIONS = {
   skip: function () { askSkip(); },
   finishVault: function () { finishVault(); },
   openQ: function (el) { openQ(Number(el.getAttribute('data-i'))); },
+  toggleMap: function () { S.play.mapHidden = !S.play.mapHidden; renderPlay(); },
+  setTheme: function (el) { S.room.theme = el.getAttribute('data-t'); S.saver.touch(); renderRoomEditor(); },
   star: function (el) {
     var pid = el.getAttribute('data-pid'), v = Number(el.getAttribute('data-v'));
     S.play.rate[pid] = v;
@@ -1645,6 +1873,13 @@ var ACTIONS = {
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && e.target.id === 'code') ACTIONS.login();
   if (e.key === 'Enter' && e.target.id === 'pcode') ACTIONS.toPlay();
+  // 地圖上的島／拼圖／星球是 SVG，要自己處理鍵盤操作
+  var t = e.target;
+  if ((e.key === 'Enter' || e.key === ' ') && t.getAttribute && t.getAttribute('role') === 'button' && t.getAttribute('data-act') && t.tagName.toLowerCase() === 'g') {
+    e.preventDefault();
+    var A = ACTIONS[t.getAttribute('data-act')];
+    if (A) A(t, t.getAttribute('data-id'));
+  }
 });
 boot();
 </script>

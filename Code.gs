@@ -511,8 +511,10 @@ function movePuzzle(code, id, dir) {
  *  密室資訊（封面、說明、成功、失敗、心智圖）
  * ============================================================ */
 
-var ROOM_FIELDS = ['title', 'cover', 'story', 'success', 'fail', 'mindmap'];
-var ROOM_ADMIN_FIELDS = ['timeLimitMin', 'location', 'groupName', 'finale', 'skipMin', 'mode'];
+var ROOM_FIELDS = ['title', 'cover', 'story', 'success', 'fail', 'mindmap', 'mode', 'theme'];
+var ROOM_ADMIN_FIELDS = ['timeLimitMin', 'location', 'groupName', 'finale', 'skipMin'];
+// 自由選題的地圖樣式：小島、拼圖（解開一塊就拼出一塊封面圖）、星球、清單
+var MAP_THEMES = ['island', 'jigsaw', 'planet', 'list'];
 
 function saveRoom(code, data) {
   var a = account_(code);
@@ -526,7 +528,8 @@ function saveRoom(code, data) {
     if ((data.rev || 0) !== (room.rev || 0)) return { conflict: true, room: stripRow_(room) };
     ROOM_FIELDS.forEach(function (f) { if (data[f] !== undefined) room[f] = data[f]; });
     if (a.role === 'admin') ROOM_ADMIN_FIELDS.forEach(function (f) { if (data[f] !== undefined) room[f] = data[f]; });
-    if (room.mode !== undefined) room.mode = room.mode === 'free' ? 'free' : 'linear';
+    if (room.mode !== undefined) room.mode = modeOf_(room);
+    if (room.theme !== undefined) room.theme = themeOf_(room);
     room.rev = (room.rev || 0) + 1;
     putDoc_('Rooms', room);
     return { room: room };
@@ -550,10 +553,13 @@ function blankRoom_(kind, ownerCode, title, s) {
     // 選用玩法（管理者設定）：終章碎片、跳過扣時、寶庫
     finale: { enabled: false, text: '', imageId: '', answer: '', hint: '' },
     fragments: [], skipMin: 0, vaultIds: [],
-    // 玩法：linear 一題接一題；free 自由選題（主線各題同時開放，全部解完才逃脫或進終章）
-    mode: 'linear'
+    // 玩法：free 自由選題（預設，主線各題同時開放，全部解完才逃脫或進終章）；linear 一題接一題
+    mode: 'free', theme: 'island'
   };
 }
+/** 沒設過玩法的密室一律當成自由選題（預設）；只有明確選了 linear 才一題接一題 */
+function modeOf_(room) { return room.mode === 'linear' ? 'linear' : 'free'; }
+function themeOf_(room) { return MAP_THEMES.indexOf(room.theme) >= 0 ? room.theme : 'island'; }
 function finaleOf_(room) {
   var f = room.finale || {};
   return { enabled: !!f.enabled, text: f.text || '', imageId: f.imageId || '', answer: f.answer || '', hint: f.hint || '' };
@@ -855,7 +861,7 @@ function submitRoom(code) {
  * ============================================================ */
 
 var SNAP_ROOM_FIELDS = ['id', 'kind', 'title', 'groupName', 'cover', 'story', 'success', 'fail', 'timeLimitMin',
-  'finale', 'fragments', 'skipMin', 'mode'];
+  'finale', 'fragments', 'skipMin', 'mode', 'theme'];
 var SNAP_PUZZLE_FIELDS = ['id', 'title', 'author', 'kind', 'estMinutes', 'steps', 'blocks', 'answer', 'hints', 'props'];
 
 function makeSnapshot_(room, test) {
@@ -866,6 +872,9 @@ function makeSnapshot_(room, test) {
     vault: (room.vaultIds || []).length ? roomVault_(room).map(function (p) { return pick(p, SNAP_PUZZLE_FIELDS); }) : []
   };
   if (!snap.puzzles.length) throw new Error('這個密室還沒有題目');
+  // 快照一律寫明玩法；這個欄位出現前發布的舊快照沒有 mode，照舊一題接一題，正在玩的不會突然改變
+  snap.room.mode = modeOf_(room);
+  snap.room.theme = themeOf_(room);
   var version = (test ? 'test-' : 'v') + Date.now().toString(36);
   var folder = DriveApp.getFolderById(prop_('SNAP_ID'));
   var f = folder.createFile(Utilities.newBlob(JSON.stringify(snap), 'application/json', room.id + '-' + version + '.json'));
@@ -922,7 +931,7 @@ function introOf_(snap) {
     }).map(mediaPage_),
     total: snap.puzzles.length, timeLimitSec: (Number(r.timeLimitMin) || settings_().playMinutes) * 60,
     finale: finaleOn_(snap), skipMin: Number(r.skipMin) || 0, vaultTotal: (snap.vault || []).length,
-    free: isFree_(snap)
+    free: isFree_(snap), theme: snap.room.theme || 'island'
   };
 }
 
@@ -1197,7 +1206,7 @@ function stateOf_(r, havePuzzleId) {
     skipMin: Number(snap.room.skipMin) || 0, skips: r.st.skips || 0, penaltySec: r.st.penaltySec || 0,
     vaultTotal: vault.length, vaultIndex: r.st.vi || 0, vaultSolved: r.st.vaultSolved || 0,
     escapeSec: r.st.escapeSec === undefined ? null : r.st.escapeSec,
-    free: isFree_(snap)
+    free: isFree_(snap), theme: snap.room.theme || 'island'
   };
   if (out.free) {
     var psx = psOf_(r, snap);

@@ -51,7 +51,7 @@ async function seed(page) {
     mk('空氣塔', 'AIR'); mk('潮汐塔', 'TIDE'); mk('冰山塔', 'ICE'); mk('寶庫：權杖', 'GEM');
     const room = GAS('adminCreateTeacherRoom')(A, '黃金城密室');
     GAS('saveRoom')(A, {
-      id: room.id, rev: 0, timeLimitMin: 90,
+      id: room.id, rev: 0, timeLimitMin: 90, mode: 'linear',
       cover: { text: '傳說中的黃金城', imageId: '' }, story: [{ text: '海水一年年上漲，城沉進了海底。', imageId: '' }],
       success: { text: '大門打開，你們逃出來了！', imageId: '' }, fail: { text: '海水淹過了城門。', imageId: '' }
     });
@@ -227,7 +227,7 @@ test('一般密室（沒開選用玩法）畫面跟原本一樣，手機寬度�
   }
 });
 
-test('自由選題：管理者切換玩法 → 玩家用選題板挑順序 → 監看顯示已過幾題', { skip: !chromium && '沒有 Playwright' }, async () => {
+test('自由選題（預設）：設計者選地圖樣式、預覽 → 玩家在小島地圖上挑題 → 監看顯示已過幾題', { skip: !chromium && '沒有 Playwright' }, async () => {
   const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
   try {
     const { page, errors } = await openPage(browser, { width: 820, height: 1180 });
@@ -238,19 +238,33 @@ test('自由選題：管理者切換玩法 → 玩家用選題板挑順序 → �
       const ids = ['空氣塔', '潮汐塔', '冰山塔'].map((t) => bank.filter((p) => p.title === t)[0].id);
       GAS('adminSetRoomPuzzles')(A, room.id, ids, { fragments: ['7', '3', '1'] });
       const r = GAS('getRoom')(A, room.id);
-      GAS('saveRoom')(A, { id: room.id, rev: r.rev, finale: { enabled: true, text: '依位置輸入碎片', imageId: '', answer: '', hint: '' } });
+      // seed 把它設成一題接一題；這裡拿掉，模擬沒設過玩法的密室 → 預設自由選題
+      const doc = GAS('getDoc_')('Rooms', room.id); delete doc.mode; delete doc.theme; GAS('putDoc_')('Rooms', doc);
+      const r2 = GAS('getRoom')(A, room.id);
+      GAS('saveRoom')(A, { id: room.id, rev: r2.rev, finale: { enabled: true, text: '依位置輸入碎片', imageId: '', answer: '', hint: '' } });
     }, admin);
 
-    // 管理者在密室資訊選「自由選題」
     await page.fill('#code', admin);
     await click(page, '[data-act=login]');
     await click(page, '[data-act=adminTab][data-tab=bank]');
     await click(page, '[data-act=trEdit]');
+    assert.equal(await page.inputValue('[data-f=mode]'), 'free', '預設自由選題');
+    assert.equal(await page.textContent('.themes button.on'), '小島');
+    await page.waitForSelector('#mapPreview svg');
+    await shot(page, 'f0-admin-mode');
+    for (const t of ['jigsaw', 'planet', 'island']) {
+      await click(page, `[data-act=setTheme][data-t=${t}]`);
+      await page.waitForSelector('#mapPreview svg');
+      if (SHOTS) await page.locator('#mapPreview').screenshot({ path: path.join(SHOTS, 'f1-preview-' + t + '.png') });
+    }
+    // 改成一題接一題時，地圖樣式就收起來
+    await page.selectOption('[data-f=mode]', 'linear');
+    await page.waitForFunction(() => !document.getElementById('mapPreview'));
     await page.selectOption('[data-f=mode]', 'free');
-    await shot(page, 'f1-admin-mode');
+    await page.waitForSelector('#mapPreview svg');
     await click(page, '[data-act=backRoom]');
     await click(page, '[data-act=adminTab][data-tab=bank]');
-    await page.waitForFunction(() => /自由選題、終章碎片/.test(document.getElementById('adminBody').textContent));
+    await page.waitForFunction(() => /自由選題・小島、終章碎片/.test(document.getElementById('adminBody').textContent));
     await click(page, '[data-act=adminTab][data-tab=overview]');
     await page.locator('.card', { hasText: '示範：黃金城密室' }).locator('[data-act=roomAction][data-a=publish]').click();
     await click(page, '#cfOk');
@@ -269,25 +283,30 @@ test('自由選題：管理者切換玩法 → 玩家用選題板挑順序 → �
       if (await page.locator('[data-act=introNext]', { hasText: '開始挑戰' }).count()) assert.match(await page.textContent('.pcard'), /自己挑順序/);
       await click(page, '[data-act=introNext]');
     }
-    await page.waitForSelector('#board button');
+    await page.waitForSelector('#board svg');
     assert.equal(await page.textContent('#barIdx'), '已過 0 / 3 題');
-    assert.equal(await page.locator('#board button').count(), 3);
-    assert.match(await page.textContent('.pcard h2'), /空氣塔/);
+    assert.equal(await page.locator('#board [data-act=openQ]').count(), 2, '目前這題不用點，其他兩座島可以點');
+    assert.match(await page.textContent('.maphint'), /小島/);
 
-    // 直接挑第 3 題
-    await click(page, '[data-act=openQ][data-i="2"]');
+    // 用鍵盤選第 3 座島
+    await page.focus('#board [data-act=openQ][data-i="2"]');
+    await page.keyboard.press('Enter');
     await page.waitForFunction(() => /冰山塔/.test(document.querySelector('.pcard h2').textContent));
-    await shot(page, 'f2-play-board');
+    await shot(page, 'f2-play-island');
     const answer = async (v) => { await page.fill('#ans', v); await click(page, '#goBtn'); };
     await answer('ICE');
     await page.waitForSelector('.flash');
-    assert.match(await page.textContent('.flash'), /拿到碎片「1」/);
     await page.waitForFunction(() => document.getElementById('barIdx') && document.getElementById('barIdx').textContent === '已過 1 / 3 題');
-    assert.ok(await page.locator('[data-act=openQ][data-i="2"]').isDisabled(), '解開的題目不能再開');
-    assert.match(await page.textContent('[data-act=openQ][data-i="2"]'), /✓/);
-    // 線索簿：第 3 格有碎片，前兩格空著
+    assert.equal(await page.locator('#board [data-act=openQ][data-i="2"]').count(), 0, '解開的島不能再點');
     assert.deepEqual(await page.locator('.frag').allTextContents(), ['1', '2', '1']);
-    assert.equal(await page.locator('.frag.empty').count(), 2);
+    await shot(page, 'f3-play-island-solved');
+
+    // 收起、打開地圖
+    await click(page, '[data-act=toggleMap]');
+    await page.waitForFunction(() => !document.querySelector('#board svg'));
+    assert.match(await page.textContent('#board'), /已過 1 \/ 3 題/);
+    await click(page, '[data-act=toggleMap]');
+    await page.waitForSelector('#board svg');
 
     await page.waitForFunction(() => /空氣塔/.test(document.querySelector('.pcard h2').textContent));
     await answer('AIR');
@@ -295,14 +314,13 @@ test('自由選題：管理者切換玩法 → 玩家用選題板挑順序 → �
     await page.waitForFunction(() => /潮汐塔/.test(document.querySelector('.pcard h2').textContent));
     await answer('TIDE');
     await page.waitForFunction(() => document.getElementById('barIdx') && document.getElementById('barIdx').textContent === '終章');
-    assert.ok(!(await page.locator('#board').isVisible()), '終章不顯示選題板');
+    assert.ok(!(await page.locator('#board').isVisible()), '終章不顯示地圖');
     await answer('731');
     await page.waitForSelector('[data-act=sendRate]');
     assert.match(await page.textContent('.play'), /逃脫成功！/);
     await click(page, '[data-act=sendRate]');
     await page.waitForSelector('text=謝謝你的回饋');
 
-    // 監看
     await click(page, '[data-act=toLogin]');
     await page.fill('#code', admin);
     await click(page, '[data-act=login]');
@@ -310,6 +328,35 @@ test('自由選題：管理者切換玩法 → 玩家用選題板挑順序 → �
     await page.waitForSelector('#adminBody table');
     assert.match(await page.textContent('#adminBody'), /自由隊/);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 820));
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('拼圖地圖：解開的塊拼出封面圖；手機寬度不會橫向捲動', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const { page, errors } = await openPage(browser, { width: 390, height: 844 });
+    // 12 題的拼圖（4×3），塞一張畫好的封面圖，直接畫出地圖看凸凹與裁切
+    const html = await page.evaluate(() => {
+      const c = document.createElement('canvas'); c.width = 600; c.height = 450;
+      const g = c.getContext('2d');
+      const grd = g.createLinearGradient(0, 0, 600, 450); grd.addColorStop(0, '#f6c453'); grd.addColorStop(1, '#2a7ab0');
+      g.fillStyle = grd; g.fillRect(0, 0, 600, 450);
+      g.fillStyle = '#fff'; g.beginPath(); g.arc(300, 225, 120, 0, 7); g.fill();
+      const img = c.toDataURL('image/png');
+      const st = ['solved', 'solved', 'skipped', 'current', 'opened', 'solved', 'new', 'new', 'solved', 'new', 'opened', 'new'];
+      const board = st.map((s, i) => ({ no: i + 1, title: '第' + (i + 1) + '關的題目名稱', status: s }));
+      document.body.innerHTML = '<div class="play" style="background:#14181d"><div class="map" id="m">' + mapHtml(board, 'jigsaw', { image: img, uid: 't' }) + '</div></div>' +
+        '<div class="play" style="background:#14181d"><div class="map">' + mapHtml(board, 'planet', {}) + '</div></div>' +
+        '<div class="play" style="background:#14181d"><div class="map">' + mapHtml(board.slice(0, 7), 'island', {}) + '</div></div>';
+      return document.getElementById('m').innerHTML;
+    });
+    assert.match(html, /clip-path="url\(#t-clip\)"/);
+    assert.equal((html.match(/data-act="openQ"/g) || []).length, 6, '只有還沒解開、也不是目前這題的可以點');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
+    await shot(page, 'f4-maps-phone');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

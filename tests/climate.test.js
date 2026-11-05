@@ -17,7 +17,7 @@ function climateRoom(env, opts) {
   H.fillRoomPages(env, env.admin, room.id);
   const r = env.plain(env.gs.getRoom(env.admin, room.id));
   env.gs.saveRoom(env.admin, {
-    id: room.id, rev: r.rev, timeLimitMin: 90, skipMin: opts.skipMin === undefined ? 5 : opts.skipMin,
+    id: room.id, rev: r.rev, timeLimitMin: 90, skipMin: opts.skipMin === undefined ? 5 : opts.skipMin, mode: 'linear',
     finale: { enabled: opts.finale !== false, text: '把碎片依序輸入', imageId: '', answer: opts.finaleAnswer || '', hint: '看線索簿' }
   });
   const pub = env.plain(env.gs.adminRoomAction(env.admin, room.id, 'publish'));

@@ -124,6 +124,12 @@ body.playing{background:#12161b;color:#eef0f2}
 .vaultnote{border:1px solid #3d6b4f;background:#16251c;color:#bfe8cc;border-radius:12px;padding:10px 14px;margin-bottom:14px}
 .prow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .frag-in{width:70px!important;text-align:center}
+.board{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.board button{min-width:64px;min-height:48px;padding:6px 12px;border-radius:12px;border:1px solid #3a4552;background:#1d232b;color:#eef0f2;font-size:16px;cursor:pointer;text-align:left;line-height:1.3}
+.board button small{display:block;font-size:12px;color:#9aa4ae;max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board button.cur{border-color:#f3c969;background:#3a3220;color:#f3c969}
+.board button.done{background:#16251c;border-color:#3d6b4f;color:#8fe0a6;cursor:default}
+.board button.skip{background:#2b2620;border-color:#6b5a3d;color:#c9b48a;cursor:default}
 /* 列印 */
 .printonly{display:none}
 @media print{.top,.noprint,#toast{display:none!important}.printonly{display:block}body{background:#fff}.card{break-inside:avoid;border-color:#999}.wrap{max-width:none;padding:0}}
@@ -765,7 +771,9 @@ function renderRoomEditor() {
   S.view = 'room';
   var h = topbar('密室資訊' + (ro ? '（唯讀）' : ''), { back: 'backRoom', status: !ro }) + '<div class="wrap">';
   h += '<div class="card"><h3>密室名稱</h3><input type="text" data-f="title" value="' + esc(r.title) + '"' + dis + '>';
-  if (admin) h += '<div class="row"><div><label class="f">遊玩時間（分鐘）</label><input type="number" data-num="1" data-f="timeLimitMin" value="' + esc(r.timeLimitMin) + '"></div><div><label class="f">教室／地點</label><input type="text" data-f="location" value="' + esc(r.location) + '"></div></div>';
+  if (admin) h += '<div class="row"><div><label class="f">遊玩時間（分鐘）</label><input type="number" data-num="1" data-f="timeLimitMin" value="' + esc(r.timeLimitMin) + '"></div><div><label class="f">教室／地點</label><input type="text" data-f="location" value="' + esc(r.location) + '"></div></div>' +
+    '<label class="f">玩法</label><select data-f="mode"><option value="linear"' + (r.mode !== 'free' ? ' selected' : '') + '>一題接一題（解開才看到下一題）</option><option value="free"' + (r.mode === 'free' ? ' selected' : '') + '>自由選題（所有題目同時開放，全部過關才逃脫）</option></select>' +
+    '<p class="help">自由選題適合各題互不相依的密室；如果某一題要用到別題的答案或道具，請用一題接一題。改了玩法要「更新發布版本」才會生效。</p>';
   h += '</div>';
   h += '<div class="card"><h3>封面</h3>' + mediaPageHtml('cover', r.cover, '封面', ro) + '</div>';
   h += '<div class="card"><h3>說明頁（1～3 頁，講故事、交代任務）</h3>';
@@ -889,6 +897,7 @@ function adminBankHtml(d) {
 }
 function playExtrasText(r) {
   var x = [];
+  if (r.mode === 'free') x.push('自由選題');
   if (r.finale && r.finale.enabled) x.push('終章碎片');
   if (Number(r.skipMin) > 0) x.push('跳過扣 ' + r.skipMin + ' 分');
   if ((r.vaultIds || []).length) x.push('寶庫 ' + r.vaultIds.length + ' 題');
@@ -931,7 +940,9 @@ function loadLive() {
     var b = document.getElementById('adminBody');
     if (!b || S.admin.tab !== 'live') return;
     b.innerHTML = '<div class="card"><h3>最近三小時的遊戲 <span class="muted" style="font-size:13px">每 10 秒更新</span></h3>' + (rows.length ? '<table><tr><th>隊伍</th><th>密室</th><th>進度</th><th>時間</th><th>提示</th><th>答錯</th><th>跳過</th><th>狀態</th></tr>' + rows.map(function (r) {
-      var where = r.phase === 'finale' ? '終章' : r.phase === 'vault' ? '寶庫 ' + (r.vaultIndex + 1) + ' / ' + r.vaultTotal : (r.result ? r.total : r.index + 1) + ' / ' + r.total;
+      var where = r.phase === 'finale' ? '終章' : r.phase === 'vault' ? '寶庫 ' + (r.vaultIndex + 1) + ' / ' + r.vaultTotal
+        : r.free && !r.result ? '已過 ' + (r.solvedCount || 0) + ' / ' + r.total + '（看第 ' + (r.index + 1) + ' 題）'
+        : (r.result ? r.total : r.index + 1) + ' / ' + r.total;
       return '<tr><td>' + esc(r.team) + (r.test ? ' <span class="chip">試玩</span>' : '') + '</td><td>' + esc(r.room) + '</td><td>' + where + '</td><td>' + fmtSec(r.elapsedSec) + '</td><td>' + (r.hints || 0) + '</td><td>' + r.wrong + '</td><td>' + (r.skips || 0) + '</td><td>' +
         (r.result === 'escaped' ? '<span class="chip approved">逃脫成功' + (r.escapeSec !== null && r.escapeSec !== undefined ? ' ' + fmtSec(r.escapeSec) : '') + '</span>' + (r.vaultTotal ? ' <span class="chip">寶物 ' + r.vaultSolved + '</span>' : '') : r.result === 'timeout' ? '<span class="chip submitted">時間到</span>' : '<span class="chip draft">進行中</span>') + '</td></tr>';
     }).join('') + '</table>' : '<p class="muted">目前沒有遊戲。</p>') + '</div>';
@@ -960,8 +971,9 @@ function adminView(roomId) {
         '<h3 style="font-size:16px;margin-top:12px">檢核</h3>' + checksHtml(p.checks) + '</div>';
     });
     var fin = r.finale || {};
-    if (fin.enabled || Number(r.skipMin) > 0) {
+    if (fin.enabled || Number(r.skipMin) > 0 || r.mode === 'free') {
       h += '<div class="card"><h3>選用玩法</h3><div class="kv">' +
+        '<span class="muted">玩法</span><span>' + (r.mode === 'free' ? '自由選題' : '一題接一題') + '</span>' +
         '<span class="muted">跳過</span><span>' + (Number(r.skipMin) > 0 ? '扣 ' + esc(r.skipMin) + ' 分鐘' : '不能跳過') + '</span>' +
         (fin.enabled ? '<span class="muted">碎片</span><span>' + d.puzzles.map(function (p, i) { return (i + 1) + '：' + esc((r.fragments || [])[i] || '（沒設）'); }).join('　') + '</span>' +
           '<span class="muted">終章密碼</span><span><b>' + esc(fin.answer || (r.fragments || []).slice(0, d.puzzles.length).join('')) + '</b>' + (fin.answer ? '' : '（碎片依序）') + '</span>' +
@@ -1088,8 +1100,9 @@ function showIntroPage() {
   var pages = introPages(), k = S.play.page, it = S.play.intro;
   if (!pages.length || k >= pages.length) return beginPlay();
   var pg = pages[k];
-  app.innerHTML = '<div class="play"><div class="bar"><b>' + esc(it.title) + '</b>' + (S.play.test ? ' <span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span>' + it.total + ' 題 · ' + Math.round(it.timeLimitSec / 60) + ' 分鐘</span></div>' +
+  app.innerHTML = '<div class="play"><div class="bar"><b>' + esc(it.title) + '</b>' + (S.play.test ? ' <span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span>' + it.total + ' 題 · ' + Math.round(it.timeLimitSec / 60) + ' 分鐘' + (it.free ? ' · 自由選題' : '') + '</span></div>' +
     '<div class="pcard">' + (k === 0 ? '<h2>' + esc(it.title) + '</h2>' : '') + (pg.image ? '<img src="' + pg.image + '">' : '') + '<div class="txt">' + esc(pg.text) + '</div>' +
+    (k === pages.length - 1 && it.free ? '<p style="color:#aab3bd">這間密室的題目可以自己挑順序，全部過關才能逃脫。卡住了就先換一題。</p>' : '') +
     '<button class="pbtn" data-act="introNext">' + (k === pages.length - 1 ? '開始挑戰（開始計時）' : '下一頁') + '</button></div></div>';
 }
 function beginPlay() {
@@ -1111,6 +1124,7 @@ function isOver(st) { return st.over === undefined ? !!st.result : st.over; }
 function playLabel(st) {
   if (st.phase === 'finale') return '終章';
   if (st.phase === 'vault') return '寶庫 ' + (st.vaultIndex + 1) + ' / ' + st.vaultTotal;
+  if (st.free) return '已過 ' + (st.solvedCount || 0) + ' / ' + st.total + ' 題';
   return '第 ' + (st.index + 1) + ' / ' + st.total + ' 題';
 }
 function fragmentsHtml(st) {
@@ -1118,9 +1132,27 @@ function fragmentsHtml(st) {
   var h = '<div class="frags"><span>線索簿</span>';
   for (var i = 0; i < st.total; i++) {
     var f = st.fragments[i];
-    h += f === undefined ? '<span class="frag empty" aria-label="第 ' + (i + 1) + ' 塊碎片還沒拿到">' + (i + 1) + '</span>' : '<span class="frag" aria-label="第 ' + (i + 1) + ' 塊碎片">' + esc(f) + '</span>';
+    h += f === undefined || f === null ? '<span class="frag empty" aria-label="第 ' + (i + 1) + ' 塊碎片還沒拿到">' + (i + 1) + '</span>' : '<span class="frag" aria-label="第 ' + (i + 1) + ' 塊碎片">' + esc(f) + '</span>';
   }
   return h + '</div>';
+}
+/** 自由選題的選題板：已過的題目不能再開 */
+function boardHtml(st) {
+  if (!st.board) return '';
+  return st.board.map(function (b, i) {
+    var cls = b.status === 'current' ? 'cur' : b.status === 'solved' ? 'done' : b.status === 'skipped' ? 'skip' : '';
+    var tag = b.status === 'solved' ? '✓ ' : b.status === 'skipped' ? '跳過 ' : '';
+    var off = b.status === 'solved' || b.status === 'skipped' || b.status === 'current';
+    return '<button type="button" class="' + cls + '" data-act="openQ" data-i="' + i + '"' + (off ? ' disabled' : '') +
+      ' aria-label="第 ' + b.no + ' 題 ' + esc(b.title) + (b.status === 'solved' ? '，已解開' : b.status === 'skipped' ? '，已跳過' : b.status === 'current' ? '，目前這題' : '') + '">' +
+      tag + '第 ' + b.no + ' 題<small>' + esc(b.title) + '</small></button>';
+  }).join('');
+}
+function openQ(i) {
+  var P = S.play;
+  if (!P || P.busy) return;
+  P.busy = true;
+  api('playOpen', P.id, i).then(function (st) { P.busy = false; applyPlayState(st); }).catch(function (e) { P.busy = false; fail(e); });
 }
 function renderPlay(msg, good) {
   clearTimers();
@@ -1129,12 +1161,16 @@ function renderPlay(msg, good) {
   // 同一題只畫一次題目內容，避免 HTML 小遊戲被重新載入
   if (P.renderedPid !== st.puzzleId || !document.getElementById('blocks')) {
     app.innerHTML = '<div class="play"><div class="bar"><span id="barIdx"></span>' + (P.test ? '<span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span class="timer" id="tm">' + fmtSec(st.remainingSec) + '</span></div>' +
+      '<div class="board" id="board"></div>' +
       '<div class="pcard"><h2>' + esc(st.title) + '</h2><div id="blocks"></div></div><div class="pcard" id="panel"></div></div>';
     renderPlayBlocks(document.getElementById('blocks'), P.blocks, false);
     P.renderedPid = st.puzzleId;
     window.scrollTo(0, 0);
   }
   document.getElementById('barIdx').textContent = playLabel(st);
+  var bd = document.getElementById('board');
+  bd.innerHTML = boardHtml(st);
+  bd.style.display = st.board ? '' : 'none';
   document.getElementById('panel').innerHTML =
     (st.phase === 'vault' ? '<div class="vaultnote">你們已經逃出來了！逃脫時間 ' + fmtSec(st.escapeSec) + '。寶庫拿到 ' + st.vaultSolved + ' 件寶物，想停就停，不影響逃脫時間。</div>' : '') +
     '<div class="gate">' + (st.gateCount > 1 ? '第 ' + (st.gate + 1) + ' / ' + st.gateCount + ' 步：' + esc(st.gateLabel) : '輸入答案') + '</div>' +
@@ -1468,6 +1504,7 @@ var ACTIONS = {
   hint: function () { askHint(); },
   skip: function () { askSkip(); },
   finishVault: function () { finishVault(); },
+  openQ: function (el) { openQ(Number(el.getAttribute('data-i'))); },
   star: function (el) {
     var pid = el.getAttribute('data-pid'), v = Number(el.getAttribute('data-v'));
     S.play.rate[pid] = v;

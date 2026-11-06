@@ -1431,7 +1431,7 @@ function renderPlay(msg, good) {
   bd.style.display = st.board ? '' : 'none';
   document.getElementById('panel').innerHTML =
     (st.phase === 'vault' ? '<div class="vaultnote">你們已經逃出來了！逃脫時間 ' + fmtSec(st.escapeSec) + '。寶庫拿到 ' + st.vaultSolved + ' 件寶物，想停就停，不影響逃脫時間。</div>' : '') +
-    '<div class="gate">' + (st.gateCount > 1 ? '第 ' + (st.gate + 1) + ' / ' + st.gateCount + ' 步：' + esc(st.gateLabel) : '輸入答案') + '</div>' +
+    '<div class="gate">' + (st.gateCount > 1 ? '第 ' + (st.gate + 1) + ' / ' + st.gateCount + ' 步：輸入答案' : '輸入答案') + '</div>' +
     '<input class="pin" id="ans" autocomplete="off" autocapitalize="off"><button class="pbtn" id="goBtn" data-act="answer">送出</button>' +
     '<div class="pmsg ' + (good ? 'good' : 'bad') + '" id="pmsg">' + esc(msg || '') + '</div>' +
     st.hintsShown.map(function (t, i) { return '<div class="phint">提示 ' + (i + 1) + '：' + esc(t) + ((st.hintImgs || [])[i] ? '<img data-hint-img="' + i + '" alt="提示圖片">' : '') + '</div>'; }).join('') +
@@ -1599,7 +1599,7 @@ function finishRate() {
   var list = Object.keys(P.rate).map(function (k) { return { id: k, rating: P.rate[k] }; });
   api('playRate', P.id, list, document.getElementById('liked').value, document.getElementById('stuck').value).then(function () {
     app.innerHTML = '<div class="play"><div class="pcard center"><h2>謝謝你的回饋！</h2>' +
-      (P.test && S.code ? '<button class="pbtn" data-act="backFromTest">回到編輯</button>' : '<p>可以把平板交給下一隊了。</p><button class="pbtn ghost" data-act="toLogin">回到首頁</button>') + '</div></div>';
+      (P.test && S.code ? '<button class="pbtn" data-act="backFromTest">回到編輯</button>' : '<button class="pbtn ghost" data-act="toLogin">回到首頁</button>') + '</div></div>';
   }).catch(fail);
 }
 

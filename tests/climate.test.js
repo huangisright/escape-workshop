@@ -51,7 +51,7 @@ test('組裝：碎片跟著位置走，寶庫排除主線與重複，檢核會�
 test('完整流程：主線拿碎片 → 跳過扣時照樣拿碎片 → 終章 → 逃脫時間定下 → 寶庫', () => {
   const env = H.load();
   const { room, main, vault } = climateRoom(env);
-  const intro = env.plain(env.gs.playStart(room.playCode, '探險隊'));
+  const intro = env.plain(env.gs.playStart(room.playCode, '探險隊', ['甲']));
   assert.equal(intro.finale, true);
   assert.equal(intro.vaultTotal, 2);
   assert.equal(intro.skipMin, 5);

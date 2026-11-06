@@ -1086,13 +1086,19 @@ function mediaPage_(pg) {
 }
 
 /** 玩家用遊戲代碼開始（未開始計時，先看封面與說明） */
-function playStart(playCode, team) {
+function playStart(playCode, team, members) {
   playCode = String(playCode || '').trim().toUpperCase();
   team = String(team || '').trim().substring(0, 30);
   if (!team) throw new Error('請輸入隊名');
   var room = allDocs_('Rooms').filter(function (r) { return r.published && !r.deleted && String(r.playCode).toUpperCase() === playCode; })[0];
   if (!room) throw new Error('遊戲代碼不正確，或這個密室還沒開放');
-  return startPlay_(room, room.publishedVersion, team, false);
+  members = cleanMembers_(members);
+  if (!members.length) throw new Error('請至少輸入一位闖關成員的名字');
+  return startPlay_(room, room.publishedVersion, team, false, members);
+}
+function cleanMembers_(m) {
+  return (Array.isArray(m) ? m : []).map(function (x) { return String(x || '').trim().substring(0, 20); })
+    .filter(function (x) { return x; }).slice(0, 12);
 }
 
 /** 作者或管理者試玩（用目前內容做一份測試快照，不計入數據） */
@@ -1103,15 +1109,15 @@ function startTestPlay(code, roomId) {
   var room = getDoc_('Rooms', roomId);
   if (!room) throw new Error('找不到密室');
   var version = withLock_(function () { return makeSnapshot_(room, true); });
-  return startPlay_(room, version, '試玩-' + a.name, true);
+  return startPlay_(room, version, '試玩-' + a.name, true, [a.name]);
 }
 
-function startPlay_(room, version, team, test) {
+function startPlay_(room, version, team, test, members) {
   var snap = loadSnapshot_(version);
   var play = {
     id: newId_('g'), roomId: room.id, team: team, test: !!test, started: '', ended: '', result: '',
     st: { snap: version, index: 0, gate: 0, puzzleStart: 0, startMs: 0, hints: 0, cooldownUntil: 0, wrong: 0,
-          phase: 'main', fragments: [], skips: 0, penaltySec: 0, vi: 0, vaultSolved: 0, escapeSec: null }
+          phase: 'main', members: members || [], solveSec: {}, fragments: [], skips: 0, penaltySec: 0, vi: 0, vaultSolved: 0, escapeSec: null }
   };
   withLock_(function () {
     play.state = JSON.stringify(play.st);
@@ -1217,6 +1223,15 @@ function stateOf_(r, havePuzzleId) {
     if (out.escapeSec !== null) out.elapsedSec = out.escapeSec;
     var pg = r.result === 'escaped' ? snap.room.success : snap.room.fail;
     out.ending = mediaPage_(pg);
+    var ss = r.st.solveSec || {};
+    var d = r.ended ? new Date(r.ended) : new Date();
+    out.cert = {
+      room: snap.room.title || '', team: r.team, members: r.st.members || [],
+      date: Utilities.formatDate(isNaN(d) ? new Date() : d, 'Asia/Taipei', 'yyyy-MM-dd').split('-').map(Number).join('/'),
+      puzzles: snap.puzzles.map(function (p) {
+        return { title: p.title, author: p.author || '', sec: ss[p.id] === undefined ? null : ss[p.id] };
+      })
+    };
     var item = function (p, i) { return { id: p.id, no: i + 1, title: p.title, author: p.author || '' }; };
     if (r.result === 'escaped') out.rateList = snap.puzzles.map(item);
     else if (out.free) {
@@ -1236,7 +1251,6 @@ function stateOf_(r, havePuzzleId) {
   var visibleHints = hintsOf_(p);
   out.puzzleId = p.id;
   out.title = p.title;
-  out.author = p.author || '';
   out.gate = r.st.gate;
   out.gateCount = gates.length;
   out.gateLabel = gates[r.st.gate].label;
@@ -1298,6 +1312,7 @@ function playAnswer(playId, answer) {
       return res;
     }
     logEvent_(r, p.id, 'solve', '', since);
+    if (phase_(r.st) === 'main') { r.st.solveSec = r.st.solveSec || {}; r.st.solveSec[p.id] = since; }
     res.solved = true;
     var wasEscaped = r.result === 'escaped';
     res.fragment = advance_(r, snap, false);

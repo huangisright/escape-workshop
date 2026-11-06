@@ -108,6 +108,7 @@ test('管理者設定終章、跳過、寶庫 → 發布 → 玩家完整走完 
     await page.fill('#pcode', playCode);
     await click(page, '[data-act=toPlay]');
     await page.fill('#team', '探險隊');
+    await page.fill('#mem input', '小明');
     await click(page, '[data-act=playStart]');
     await page.waitForSelector('[data-act=introNext]');
     while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
@@ -159,6 +160,7 @@ test('管理者設定終章、跳過、寶庫 → 發布 → 玩家完整走完 
     assert.match(end, /用時 5:\d\d（含跳過扣時 5 分鐘）/);
     assert.match(end, /寶庫寶物 1 \/ 1 件/);
     assert.match(end, /寶庫 1　寶庫：權杖/);
+    await shot(page, '6-cert');
     await shot(page, '6-play-ending');
     await page.locator('[data-act=star][data-v="3"]').first().click();
     await click(page, '[data-act=sendRate]');
@@ -210,6 +212,7 @@ test('一般密室（沒開選用玩法）畫面跟原本一樣，手機寬度�
     await page.fill('#pcode', playCode);
     await click(page, '[data-act=toPlay]');
     await page.fill('#team', '一隊');
+    await page.fill('#mem input', '小明');
     await click(page, '[data-act=playStart]');
     while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
     await page.waitForSelector('#barIdx');
@@ -277,6 +280,7 @@ test('自由選題（預設）：設計者選地圖樣式、預覽 → 玩家在
     await page.fill('#pcode', playCode);
     await click(page, '[data-act=toPlay]');
     await page.fill('#team', '自由隊');
+    await page.fill('#mem input', '小明');
     await click(page, '[data-act=playStart]');
     await page.waitForSelector('[data-act=introNext]');
     while (await page.locator('[data-act=introNext]').count()) {
@@ -497,6 +501,7 @@ test('提示可以放圖片：老師上傳 → 玩家看提示時看到圖', { s
     await page.fill('#pcode', playCode);
     await click(page, '[data-act=toPlay]');
     await page.fill('#team', '一隊');
+    await page.fill('#mem input', '小明');
     await click(page, '[data-act=playStart]');
     while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
     await page.waitForSelector('#hintBtn:not([disabled])');

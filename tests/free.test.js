@@ -70,7 +70,7 @@ test('沒設過玩法的舊密室：重新發布後是自由選題；已發布�
 test('自由選題：任意順序、碎片照位置放、換題保留進度、提示只算停在這題的時間', () => {
   const env = H.load();
   const { room, puzzles } = freeRoom(env);
-  const intro = env.plain(env.gs.playStart(room.playCode, '自由隊'));
+  const intro = env.plain(env.gs.playStart(room.playCode, '自由隊', ['甲']));
   assert.equal(intro.free, true);
   let st = env.plain(env.gs.playBegin(intro.playId));
   assert.equal(st.free, true);
@@ -168,7 +168,7 @@ test('創作者署名：玩家看得到每題設計者，結束畫面的題目�
   const env = H.load();
   const { room } = H.publishedTeacherRoom(env, ['ONE', 'TWO']);
   let p = H.startPlay(env, room.playCode);
-  assert.ok(p.st.author, '題目畫面要帶設計者');
+  assert.equal(p.st.author, undefined, '闖關中不顯示設計者');
   let st = p.st;
   for (const ans of ['ONE', 'TWO']) {
     if (st.board) st = env.plain(env.gs.playOpen(p.id, ['ONE', 'TWO'].indexOf(ans)));
@@ -177,4 +177,8 @@ test('創作者署名：玩家看得到每題設計者，結束畫面的題目�
   const end = env.plain(env.gs.playState(p.id, ''));
   assert.equal(end.over, true, '兩題都解完應該結束');
   assert.ok(end.rateList.length && end.rateList.every((q) => q.author), '結束清單每題都有設計者');
+  assert.deepEqual(end.cert.members, ['甲', '乙']);
+  assert.equal(end.cert.puzzles.length, 2);
+  assert.ok(end.cert.puzzles.every((q) => q.author && q.sec !== null), '證書每題有設計者與用時');
+  assert.throws(() => env.gs.playStart(room.playCode, '隊', [' ']), /闖關成員/);
 });

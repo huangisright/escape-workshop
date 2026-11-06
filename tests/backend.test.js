@@ -120,7 +120,7 @@ test('遊玩：計時、答錯冷卻、分層提示時間、中途答案、逃�
   assert.throws(() => env.gs.playStart(room.playCode, ' '), /請輸入隊名/);
   assert.throws(() => env.gs.playStart('PXXXX', '隊'), /遊戲代碼不正確/);
 
-  const intro = env.plain(env.gs.playStart(room.playCode.toLowerCase(), '第一隊'));
+  const intro = env.plain(env.gs.playStart(room.playCode.toLowerCase(), '第一隊', ['甲']));
   assert.equal(intro.total, 2);
   assert.equal(intro.timeLimitSec, 15 * 60, '示範密室預設 15 分鐘');
   assert.equal(intro.cover.text, '黃金城');

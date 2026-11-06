@@ -58,7 +58,7 @@ function publishedTeacherRoom(env, answers, extra) {
 }
 
 function startPlay(env, playCode, team) {
-  const intro = env.plain(env.gs.playStart(playCode, team || '第一隊'));
+  const intro = env.plain(env.gs.playStart(playCode, team || '第一隊', ['甲', '乙']));
   const st = env.plain(env.gs.playBegin(intro.playId));
   return { intro, st, id: intro.playId };
 }

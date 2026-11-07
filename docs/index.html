@@ -155,6 +155,16 @@ body.playing{background:#12161b;color:#eef0f2}
 .vaultnote{border:1px solid #3d6b4f;background:#16251c;color:#bfe8cc;border-radius:12px;padding:10px 14px;margin-bottom:14px}
 .prow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .frag-in{width:70px!important;text-align:center}
+.place-in{width:150px!important}
+.pplace{display:inline-block;margin:-4px 0 12px;padding:4px 12px;border-radius:999px;background:#2b343f;color:#f3c969;font-size:16px;font-weight:700}
+.placebtn{background:none;border:1px solid #3a4652;color:#f3c969;border-radius:999px;padding:4px 12px;font-size:15px;cursor:pointer;white-space:nowrap}
+.placetbl{width:100%;border-collapse:collapse;margin-top:14px;font-size:17px}
+.placetbl th,.placetbl td{border-bottom:1px solid #2b343f;padding:10px 8px;text-align:left;vertical-align:top}
+.placetbl th{color:#9aa4ae;font-size:14px;font-weight:600}
+.placetbl td.pl{color:#f3c969;font-weight:700}
+.placetbl tr.done td{color:#7f8a95}
+.placetbl tr.done td.pl{color:#a7b48a}
+.placetbl tr.cur td{background:#232b34}
 .board{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
 .map{margin:0 0 14px}
 .map svg{display:block;width:100%;height:auto;border-radius:16px}
@@ -997,6 +1007,7 @@ function roomCardHtml(r) {
   if (r.kind === 'group' && r.status !== 'draft') h += '<button class="btn ghost sm" data-act="roomAction" data-a="unlock" data-id="' + r.id + '">開放修改</button>';
   if (r.kind === 'teacher' || r.status === 'approved') h += '<button class="btn ghost sm" data-act="roomAction" data-a="publish" data-id="' + r.id + '">' + (r.published ? '更新發布版本' : '發布') + '</button>';
   if (r.published) h += '<button class="btn ghost sm" data-act="playQr" data-id="' + r.id + '">遊玩 QR</button><button class="btn ghost sm" data-act="roomAction" data-a="unpublish" data-id="' + r.id + '">下架</button>';
+  if (r.kind === 'group') h += '<button class="btn ghost sm" data-act="placesEdit" data-id="' + r.id + '">📍 關卡位置' + (Object.keys(r.places || {}).length ? '（已設）' : '') + '</button>';
   h += '<button class="btn ghost sm" data-act="adminTest" data-id="' + r.id + '">試玩</button>';
   h += '<button class="btn ghost sm" data-act="adminStats" data-id="' + r.id + '">數據</button>';
   h += '<button class="btn ghost sm" data-act="adminExport" data-id="' + r.id + '">匯出</button>';
@@ -1139,13 +1150,29 @@ function adminStats(roomId) {
     app.innerHTML = h;
   }).catch(fail);
 }
+/** 學生密室的關卡位置：審核時順便設定（示範密室在「挑題與排序」設定） */
+function showPlacesEdit(roomId) {
+  var room = S.admin.data.rooms.filter(function (r) { return r.id === roomId; })[0];
+  S.placesEdit = { roomId: roomId, places: Object.assign({}, room.places || {}) };
+  var h = topbar('關卡位置：' + (room.groupName || room.title), { back: 'toAdmin' }) + '<div class="wrap"><div class="card">' +
+    '<p class="help" style="margin-top:0">填上每一題要到哪裡玩，例如「圖書館門口」。只要有一題填了，玩家在遊戲中就能打開「關卡位置」表；都不填就不會出現。' +
+    (room.published ? '<br><b>這間密室已經發布，存好之後要按「更新發布版本」，玩家才會看到。</b>' : '') + '</p>';
+  var list = room.puzzleList || [];
+  h += list.length ? '<div class="list">' + list.map(function (p, i) {
+    return '<div class="item"><b style="width:24px">' + (i + 1) + '</b><div class="main"><div class="t">' + esc(p.title || '（未命名）') + '</div><div class="m">' + esc(p.author || '') + '</div></div>' +
+      '<label class="muted" style="font-size:13px">📍 <input type="text" class="place-in" data-plid="' + esc(p.id) + '" value="' + esc(S.placesEdit.places[p.id] || '') + '" placeholder="地點（選填）" maxlength="40" aria-label="第 ' + (i + 1) + ' 題的地點"></label></div>';
+  }).join('') + '</div>' : '<p class="muted">這間密室還沒有題目。</p>';
+  h += '<div class="btns"><button class="btn" data-act="placesSave">儲存</button></div></div></div>';
+  app.innerHTML = h;
+}
 function showAssemble(roomId) {
   var d = S.admin.data;
   var room = d.rooms.filter(function (r) { return r.id === roomId; })[0];
   var ids = (room.puzzleIds || []).slice();
   S.assemble = {
     roomId: roomId, ids: ids, vault: (room.vaultIds || []).slice(),
-    frags: ids.map(function (id, i) { return (room.fragments || [])[i] || ''; })
+    frags: ids.map(function (id, i) { return (room.fragments || [])[i] || ''; }),
+    places: Object.assign({}, room.places || {})
   };
   renderAssemble();
 }
@@ -1163,14 +1190,18 @@ function renderAssemble() {
   h += '<div class="card" style="flex:1"><h3>這間密室（' + A.ids.length + ' 題，預估 ' + total + ' / ' + room.timeLimitMin + ' 分鐘）</h3><div class="list">' + A.ids.map(function (id, i) {
     var p = byId[id] || { title: '（已刪除）' };
     return '<div class="item"><b style="width:24px">' + (i + 1) + '</b><div class="main"><div class="t">' + esc(p.title) + '</div><div class="m">' + esc(p.author || '') + '</div></div>' +
+      '<label class="muted" style="font-size:13px">📍 <input type="text" class="place-in" data-asmplace="' + esc(id) + '" value="' + esc(A.places[id] || '') + '" placeholder="地點（選填）" maxlength="40" aria-label="' + esc(p.title) + ' 的地點"></label>' +
       (finaleOn ? '<label class="muted" style="font-size:13px">碎片 <input type="text" class="frag-in" data-asmfrag="' + i + '" value="' + esc(A.frags[i]) + '" aria-label="第 ' + (i + 1) + ' 題的碎片"></label>' : '') +
       '<button class="iconbtn" data-act="asmMove" data-i="' + i + '" data-dir="-1" aria-label="上移">↑</button><button class="iconbtn" data-act="asmMove" data-i="' + i + '" data-dir="1" aria-label="下移">↓</button><button class="iconbtn" data-act="asmDel" data-i="' + i + '" aria-label="移除">✕</button></div>';
   }).join('') + '</div>';
   if (finaleOn) h += '<p class="help" style="margin-top:8px">碎片跟著位置走：第 1 格的碎片給第 1 題，不管放的是哪位老師的題目。終章密碼留白時，就是碎片依序接起來：<b id="asmJoined">' + esc(A.frags.join('')) + '</b></p>';
   else h += '<p class="help" style="margin-top:8px">要用碎片拼終章，先到「封面、說明、結局」開啟終章。</p>';
+  h += '<p class="help">📍 地點是選填的：只要有一題填了，玩家在遊戲中就能打開「關卡位置」表；都不填就不會出現。改完地點，已發布的密室要按「更新發布版本」才會生效。</p>';
   h += '<h3 style="margin-top:18px">寶庫（逃脫後的加碼題，' + A.vault.length + ' 題）</h3><p class="help">解開終章之後還有時間的隊伍，會一題接一題玩寶庫。寶庫做多做少不影響逃脫時間。</p><div class="list">' + A.vault.map(function (id, i) {
     var p = byId[id] || { title: '（已刪除）' };
-    return '<div class="item"><b style="width:24px">V' + (i + 1) + '</b><div class="main"><div class="t">' + esc(p.title) + '</div><div class="m">' + esc(p.author || '') + '</div></div><button class="iconbtn" data-act="asmVaultMove" data-i="' + i + '" data-dir="-1" aria-label="上移">↑</button><button class="iconbtn" data-act="asmVaultMove" data-i="' + i + '" data-dir="1" aria-label="下移">↓</button><button class="iconbtn" data-act="asmVaultDel" data-i="' + i + '" aria-label="移除">✕</button></div>';
+    return '<div class="item"><b style="width:24px">V' + (i + 1) + '</b><div class="main"><div class="t">' + esc(p.title) + '</div><div class="m">' + esc(p.author || '') + '</div></div>' +
+      '<label class="muted" style="font-size:13px">📍 <input type="text" class="place-in" data-asmplace="' + esc(id) + '" value="' + esc(A.places[id] || '') + '" placeholder="地點（選填）" maxlength="40" aria-label="' + esc(p.title) + ' 的地點"></label>' +
+      '<button class="iconbtn" data-act="asmVaultMove" data-i="' + i + '" data-dir="-1" aria-label="上移">↑</button><button class="iconbtn" data-act="asmVaultMove" data-i="' + i + '" data-dir="1" aria-label="下移">↓</button><button class="iconbtn" data-act="asmVaultDel" data-i="' + i + '" aria-label="移除">✕</button></div>';
   }).join('') + '</div><div class="btns"><button class="btn" data-act="asmSave">儲存</button></div></div></div></div>';
   app.innerHTML = h;
 }
@@ -1453,6 +1484,22 @@ function boardHtml(st) {
       tag + '第 ' + b.no + ' 題<small>' + esc(b.title) + '</small></button>';
   }).join('');
 }
+/** 關卡位置表：自由選題看 board 的狀態，一題接一題看目前第幾題 */
+function placeStatus(st, i) {
+  if (st.board && st.board[i]) return st.board[i].status;
+  if (st.phase !== 'main') return 'solved';
+  return i < st.index ? 'solved' : i === st.index ? 'current' : 'new';
+}
+function showPlacesTable() {
+  var st = S.play && S.play.state;
+  if (!st || !st.places) return;
+  var tag = { solved: '✓ 已解開', skipped: '已跳過', current: '正在這題' };
+  modal('<div style="background:#12161b;color:#eef0f2;border-radius:12px;padding:16px 16px 10px;margin-top:22px"><h2 style="margin:0">📍 關卡位置</h2>' +
+    '<table class="placetbl"><thead><tr><th>題目</th><th>地點</th><th></th></tr></thead><tbody>' + st.places.map(function (p, i) {
+      var s = placeStatus(st, i);
+      return '<tr class="' + (s === 'solved' || s === 'skipped' ? 'done' : s === 'current' ? 'cur' : '') + '"><td>' + p.no + '. ' + esc(p.title) + '</td><td class="pl">' + esc(p.place || '—') + '</td><td style="white-space:nowrap;font-size:14px">' + (tag[s] || '') + '</td></tr>';
+    }).join('') + '</tbody></table></div>');
+}
 function openQ(i) {
   var P = S.play;
   if (!P || P.busy) return;
@@ -1466,13 +1513,16 @@ function renderPlay(msg, good) {
   // 同一題只畫一次題目內容，避免 HTML 小遊戲被重新載入
   if (P.renderedPid !== st.puzzleId || !document.getElementById('blocks')) {
     app.innerHTML = '<div class="play"><div class="bar"><span id="barIdx"></span>' + (P.test ? '<span class="testtag">試玩</span>' : '') + '<span class="sp"></span><span class="timer" id="tm">' + fmtSec(st.remainingSec) + '</span></div>' +
-      '<div class="board" id="board"></div>' +
-      '<div class="pcard"><h2>' + esc(st.title) + '</h2>' + '<div id="blocks"></div></div><div class="pcard" id="panel"></div></div>';
+      '<div id="placeBar"></div><div class="board" id="board"></div>' +
+      '<div class="pcard"><h2>' + esc(st.title) + '</h2><div id="pplace"></div><div id="blocks"></div></div><div class="pcard" id="panel"></div></div>';
     renderPlayBlocks(document.getElementById('blocks'), P.blocks, false);
     P.renderedPid = st.puzzleId;
     window.scrollTo(0, 0);
   }
   document.getElementById('barIdx').textContent = playLabel(st);
+  // 關卡位置：有填才出現；本題地點在題目標題下面，完整的表用按鈕打開
+  document.getElementById('pplace').innerHTML = st.place ? '<span class="pplace">📍 ' + esc(st.place) + '</span>' : '';
+  document.getElementById('placeBar').innerHTML = st.places ? '<div style="display:flex;justify-content:flex-end;margin:-4px 0 8px"><button type="button" class="placebtn" data-act="showPlaces">📍 關卡位置</button></div>' : '';
   var bd = document.getElementById('board');
   var theme = st.theme || 'island', cover = P.intro && P.intro.cover;
   var map = st.board && !P.mapHidden ? mapHtml(st.board, theme, { image: cover && cover.image, uid: 'pm' }) : null;
@@ -1661,6 +1711,8 @@ function finishRate() {
    ============================================================ */
 app.addEventListener('input', function (e) {
   var t = e.target, f = t.getAttribute('data-f');
+  if (t.hasAttribute('data-asmplace') && S.assemble) { S.assemble.places[t.getAttribute('data-asmplace')] = t.value; return; }
+  if (t.hasAttribute('data-plid') && S.placesEdit) { S.placesEdit.places[t.getAttribute('data-plid')] = t.value; return; }
   if (t.hasAttribute('data-asmfrag') && S.assemble) {
     S.assemble.frags[Number(t.getAttribute('data-asmfrag'))] = t.value;
     var j = document.getElementById('asmJoined');
@@ -1923,6 +1975,12 @@ var ACTIONS = {
     api('adminCreateTeacherRoom', S.code, n).then(function () { showAdmin('bank'); }).catch(fail);
   },
   assemble: function (el, id) { showAssemble(id); },
+  placesEdit: function (el, id) { showPlacesEdit(id); },
+  placesSave: function () {
+    var E = S.placesEdit;
+    api('adminSetRoomPlaces', S.code, E.roomId, E.places).then(function () { toast('已儲存'); S.placesEdit = null; showAdmin('overview'); }).catch(fail);
+  },
+  showPlaces: function () { showPlacesTable(); },
   asmAdd: function (el, id) { S.assemble.ids.push(id); S.assemble.frags.push(''); renderAssemble(); },
   asmDel: function (el) { var i = Number(el.getAttribute('data-i')); S.assemble.ids.splice(i, 1); S.assemble.frags.splice(i, 1); renderAssemble(); },
   // 碎片跟著位置走，所以排序時只動題目、不動碎片
@@ -1930,7 +1988,7 @@ var ACTIONS = {
   asmVault: function (el, id) { S.assemble.vault.push(id); renderAssemble(); },
   asmVaultDel: function (el) { S.assemble.vault.splice(Number(el.getAttribute('data-i')), 1); renderAssemble(); },
   asmVaultMove: function (el) { var a = S.assemble.vault, i = Number(el.getAttribute('data-i')), j = i + Number(el.getAttribute('data-dir')); if (j < 0 || j >= a.length) return; var t = a[i]; a[i] = a[j]; a[j] = t; renderAssemble(); },
-  asmSave: function () { var A = S.assemble; api('adminSetRoomPuzzles', S.code, A.roomId, A.ids, { fragments: A.frags, vaultIds: A.vault }).then(function () { toast('已儲存'); showAdmin('bank'); }).catch(fail); },
+  asmSave: function () { var A = S.assemble; api('adminSetRoomPuzzles', S.code, A.roomId, A.ids, { fragments: A.frags, vaultIds: A.vault, places: A.places }).then(function () { toast('已儲存'); showAdmin('bank'); }).catch(fail); },
   saveCode: function (el) {
     var c = el.getAttribute('data-code');
     var nm = document.querySelector('[data-codename="' + c + '"]'), mm = document.querySelector('[data-codemem="' + c + '"]');

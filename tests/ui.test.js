@@ -583,3 +583,76 @@ test('玩到一半頁面被手機回收：重開後接回同一場，不會跳�
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
+
+test('關卡位置：挑題時填地點 → 發布 → 玩家看到本題地點、打開位置表；學生密室在審核時設定', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const { page, errors } = await openPage(browser, { width: 1024, height: 900 });
+    const admin = await seed(page);
+    await page.evaluate((A) => {
+      const room = GAS('allDocs_')('Rooms').filter((r) => r.kind === 'teacher')[0];
+      const bank = GAS('allDocs_')('Puzzles');
+      const ids = ['空氣塔', '潮汐塔', '冰山塔'].map((t) => bank.filter((p) => p.title === t)[0].id);
+      GAS('adminSetRoomPuzzles')(A, room.id, ids, {});
+      const doc = GAS('getDoc_')('Rooms', room.id); doc.mode = 'free'; GAS('putDoc_')('Rooms', doc);
+      GAS('adminCreateGroups')(A, [{ name: '第一組', members: '甲' }]);
+    }, admin);
+
+    await page.fill('#code', admin);
+    await click(page, '[data-act=login]');
+    await click(page, '[data-act=adminTab][data-tab=bank]');
+    await click(page, '[data-act=assemble]');
+    await page.waitForSelector('[data-asmplace]');
+    assert.equal(await page.locator('[data-asmplace]').count(), 3);
+    await page.locator('[data-asmplace]').nth(0).fill('圖書館門口');
+    await page.locator('[data-asmplace]').nth(2).fill('居禮教室');
+    await shot(page, 'p0-assemble-places');
+    await click(page, '[data-act=asmSave]');
+    await page.waitForSelector('[data-act=adminTab][data-tab=bank].on');
+
+    // 學生密室：總覽卡片上有「關卡位置」
+    await click(page, '[data-act=adminTab][data-tab=overview]');
+    assert.equal(await page.locator('.card', { hasText: '示範：黃金城密室' }).locator('[data-act=placesEdit]').count(), 0, '示範密室在挑題與排序設定');
+    await page.locator('.card', { hasText: '第一組' }).locator('[data-act=placesEdit]').click();
+    await page.waitForSelector('[data-act=placesSave]');
+    await click(page, '[data-act=placesSave]');
+    await page.waitForSelector('[data-act=adminTab][data-tab=overview].on');
+
+    await page.locator('.card', { hasText: '示範：黃金城密室' }).locator('[data-act=roomAction][data-a=publish]').click();
+    await click(page, '#cfOk');
+    await page.waitForSelector('#modal .big');
+    const playCode = (await page.textContent('#modal .big')).trim();
+    await click(page, '#modal .x');
+
+    // 玩家（手機寬度）
+    await page.setViewportSize({ width: 390, height: 844 });
+    await click(page, '[data-act=logout]');
+    await page.fill('#pcode', playCode);
+    await click(page, '[data-act=toPlay]');
+    await page.fill('#team', '位置隊');
+    await page.fill('#mem input', '小明');
+    await click(page, '[data-act=playStart]');
+    await page.waitForSelector('[data-act=introNext]');
+    while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
+    await page.waitForSelector('#barIdx');
+    assert.equal(await page.textContent('.pplace'), '📍 圖書館門口');
+    await shot(page, 'p1-play-chip');
+    await page.fill('#ans', 'air');
+    await click(page, '#goBtn');
+    await page.waitForFunction(() => /已過 1 \/ 3 題/.test(document.getElementById('barIdx').textContent));
+    // 解開後會自動換到下一題（潮汐塔）；不是的話自己點
+    if (!/潮汐塔/.test(await page.textContent('.pcard h2'))) await click(page, '#board [data-act=openQ][data-i="1"]');
+    await page.waitForFunction(() => /潮汐塔/.test(document.querySelector('.pcard h2').textContent));
+    assert.equal(await page.locator('.pplace').count(), 0, '沒填地點的題目不顯示');
+    await click(page, '[data-act=showPlaces]');
+    await page.waitForSelector('.placetbl');
+    const rows = await page.locator('.placetbl tbody tr').allTextContents();
+    assert.match(rows[0], /空氣塔.*圖書館門口.*已解開/);
+    assert.match(rows[1], /潮汐塔.*—.*正在這題/);
+    assert.match(rows[2], /冰山塔.*居禮教室/);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
+    await shot(page, 'p1-play-places');
+    await click(page, '#modal .x');
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});

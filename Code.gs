@@ -57,7 +57,7 @@ var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'delete
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
   'playStart', 'startTestPlay', 'playBegin', 'playState', 'playOpen', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playHintImage', 'playRate',
   'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
-  'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
+  'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminSetRoomPlaces', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
 
 function doPost(e) {
@@ -554,7 +554,9 @@ function blankRoom_(kind, ownerCode, title, s) {
     finale: { enabled: false, text: '', imageId: '', answer: '', hint: '' },
     fragments: [], skipMin: 0, vaultIds: [],
     // 玩法：free 自由選題（預設，主線各題同時開放，全部解完才逃脫或進終章）；linear 一題接一題
-    mode: 'free', theme: 'island'
+    mode: 'free', theme: 'island',
+    // 關卡地點（管理者在挑題或審核時設定）：{ 題目 id: '圖書館門口' }；都沒填，遊戲中就不出現位置表
+    places: {}
   };
 }
 /** 沒設過玩法的密室一律當成自由選題（預設）；只有明確選了 linear 才一題接一題 */
@@ -861,7 +863,7 @@ function submitRoom(code) {
  * ============================================================ */
 
 var SNAP_ROOM_FIELDS = ['id', 'kind', 'title', 'groupName', 'cover', 'story', 'success', 'fail', 'timeLimitMin',
-  'finale', 'fragments', 'skipMin', 'mode', 'theme'];
+  'finale', 'fragments', 'skipMin', 'mode', 'theme', 'places'];
 var SNAP_PUZZLE_FIELDS = ['id', 'title', 'author', 'kind', 'estMinutes', 'steps', 'blocks', 'answer', 'hints', 'props'];
 
 function makeSnapshot_(room, test) {
@@ -1214,6 +1216,11 @@ function stateOf_(r, havePuzzleId) {
     escapeSec: r.st.escapeSec === undefined ? null : r.st.escapeSec,
     free: isFree_(snap), theme: snap.room.theme || 'island'
   };
+  // 關卡位置表：至少一題有填地點才給，舊快照沒有 places 就跟以前一樣
+  var places = snap.room.places || {};
+  if (snap.puzzles.some(function (p) { return places[p.id]; })) {
+    out.places = snap.puzzles.map(function (p, i) { return { no: i + 1, title: p.title, place: places[p.id] || '' }; });
+  }
   if (out.free) {
     var psx = psOf_(r, snap);
     out.solvedCount = psx.filter(function (e) { return !!e.done; }).length;
@@ -1251,6 +1258,7 @@ function stateOf_(r, havePuzzleId) {
   var visibleHints = hintsOf_(p);
   out.puzzleId = p.id;
   out.title = p.title;
+  out.place = places[p.id] || '';
   out.gate = r.st.gate;
   out.gateCount = gates.length;
   out.gateLabel = gates[r.st.gate].label;
@@ -1608,7 +1616,31 @@ function adminDeleteRoom(code, roomId) {
     return true;
   });
 }
-/** extra（選用）：{ fragments: 與 ids 同順序的碎片, vaultIds: 寶庫題目 } */
+/** 關卡地點只留這間密室（主線＋寶庫）裡的題目，空白的不存，每格最多 40 字 */
+var PLACE_MAX = 40;
+function cleanPlaces_(room, places) {
+  var ids = (room.puzzleIds || []).concat(room.vaultIds || []), out = {};
+  Object.keys(places || {}).forEach(function (id) {
+    var v = String(places[id] === undefined || places[id] === null ? '' : places[id]).replace(/\s+/g, ' ').trim().slice(0, PLACE_MAX);
+    if (v && ids.indexOf(id) >= 0) out[id] = v;
+  });
+  return out;
+}
+
+/** 管理者設定關卡地點（示範密室與學生密室都可以）。已發布的要按「更新發布版本」才會出現在遊戲裡 */
+function adminSetRoomPlaces(code, roomId, places) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  return withLock_(function () {
+    var room = getDoc_('Rooms', roomId);
+    if (!room || room.deleted) throw new Error('找不到這個密室');
+    room.places = cleanPlaces_(room, places);
+    putDoc_('Rooms', room);
+    return stripRow_(room);
+  });
+}
+
+/** extra（選用）：{ fragments: 與 ids 同順序的碎片, vaultIds: 寶庫題目, places: 關卡地點 } */
 function adminSetRoomPuzzles(code, roomId, ids, extra) {
   var a = account_(code);
   needRole_(a, ['admin']);
@@ -1631,6 +1663,7 @@ function adminSetRoomPuzzles(code, roomId, ids, extra) {
         return bank[id] && kept.indexOf(id) < 0 && arr.indexOf(id) === i;
       });
     }
+    if (extra && extra.places) room.places = cleanPlaces_(room, extra.places);
     putDoc_('Rooms', room);
     return stripRow_(room);
   });

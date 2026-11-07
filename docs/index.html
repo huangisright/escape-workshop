@@ -234,6 +234,8 @@ function api(fn) {
   var done = function () { netBusy(false); if (el) el.classList.remove('busy'); };
   return apiRaw.apply(null, args).then(function (r) { done(); return r; }, function (e) { done(); throw e; });
 }
+/** 網路問題（斷線、逾時、伺服器暫時回不來）：和「伺服器明確說不行」分開，斷線時不能把人踢回登入頁 */
+function netErr(msg) { var e = new Error(msg); e.net = true; return e; }
 function apiRaw(fn) {
   var args = Array.prototype.slice.call(arguments, 1);
   if (window.ER_API) { // 放在 GitHub Pages 時：直接呼叫 Apps Script 的 API，不帶 Google 登入資訊
@@ -242,16 +244,18 @@ function apiRaw(fn) {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ fn: fn, args: args })
     }).then(function (r) {
-      if (!r.ok) throw new Error('連線失敗（' + r.status + '），請稍後再試');
-      return r.json();
-    }, function () { throw new Error('連不上伺服器，請檢查網路後再試'); }).then(function (j) {
+      if (!r.ok) throw netErr('連線失敗（' + r.status + '），請稍後再試');
+      return r.json().catch(function () { throw netErr('連線不穩，請稍後再試'); });
+    }, function () { throw netErr('連不上伺服器，請檢查網路後再試'); }).then(function (j) {
       if (!j || !j.ok) throw new Error((j && j.error) || '伺服器回應錯誤');
       return j.result;
     });
   }
   return new Promise(function (res, rej) {
     var r = google.script.run.withSuccessHandler(res).withFailureHandler(function (e) {
-      rej(e && e.message ? e : new Error(String(e)));
+      var err = e && e.message ? e : new Error(String(e));
+      if (navigator.onLine === false) err.net = true;
+      rej(err);
     });
     r[fn].apply(r, args);
   });
@@ -287,6 +291,44 @@ function confirmBox(msg, okText) {
   });
 }
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
+/* 進行中的遊戲記在手機裡：手機待機、瀏覽器把分頁回收、重新整理之後，都能接回同一場 */
+function savePlayRef(end) {
+  var P = S.play;
+  if (!P || !P.id || P.test) return;
+  var old = loadPlayRef();
+  if (!old || old.id !== P.id) old = {};
+  store('erPlay', JSON.stringify({ id: P.id, code: S.playCode || old.code || '', at: old.at || Date.now(), end: end ? (old.end || Date.now()) : 0 }));
+}
+function loadPlayRef() {
+  var ref = null;
+  try { ref = JSON.parse(store('erPlay') || 'null'); } catch (e) { }
+  if (!ref || !ref.id) return null;
+  var now = Date.now();
+  // 太久以前的、或結束超過 10 分鐘的（證書看完了），就不接了
+  if (now - (ref.at || 0) > 8 * 3600 * 1000 || (ref.end && now - ref.end > 10 * 60 * 1000)) { store('erPlay', null); return null; }
+  return ref;
+}
+function showOffline(retry, msg, playing) {
+  clearTimers();
+  document.body.className = playing ? 'playing' : '';
+  var h = '<h2>目前連不上網路</h2><p>' + esc(msg) + '</p><button class="' + (playing ? 'pbtn' : 'btn') + '" id="retryBtn">重試</button>';
+  app.innerHTML = playing ? '<div class="play" style="max-width:520px;margin-top:8vh"><div class="pcard">' + h + '</div></div>' : '<div class="login"><div class="card">' + h + '</div></div>';
+  var again = function () { window.removeEventListener('online', again); retry(); };
+  document.getElementById('retryBtn').onclick = again;
+  window.addEventListener('online', again);
+}
+function resumePlay(ref) {
+  clearTimers();
+  document.body.className = 'playing';
+  S.view = 'play';
+  S.playCode = ref.code;
+  S.play = { id: ref.id, intro: null, test: false, page: 0, pid: null, blocks: null, deadline: 0, hintAt: 0, coolAt: 0, rate: {} };
+  app.innerHTML = '<div class="play"><p>接回遊戲中…</p></div>';
+  return apiRaw('playState', ref.id, '').then(applyPlayState).catch(function (e) {
+    if (e && e.net) return showOffline(function () { resumePlay(ref); }, '你的進度有保存，計時仍在進行。網路恢復後按「重試」就能接著玩。', true);
+    store('erPlay', null); S.play = null; showLogin();
+  });
+}
 function clearTimers() { S.timers.forEach(clearInterval); S.timers = []; }
 function getPath(o, path) { return path.split('.').reduce(function (x, k) { return x == null ? x : x[k]; }, o); }
 function setPath(o, path, v) {
@@ -472,6 +514,12 @@ function prepareHtml(file) {
 function boot() {
   var go = function (params) {
     params = params || {};
+    var ref = loadPlayRef();
+    if (ref && !params.c) {
+      // 同一台手機、沒有掃別的遊戲代碼：接回原本那場；掃了別的代碼才當作新的一場
+      if (!params.p || String(params.p).toUpperCase() === ref.code) return resumePlay(ref);
+      store('erPlay', null);
+    }
     if (params.p) return showPlayEntry(String(params.p).toUpperCase());
     var c = params.c || store('erCode');
     if (c) return doLogin(c, true);
@@ -501,6 +549,10 @@ function doLogin(code, silent) {
     if (me.role === 'teacher') return showTeacherHome();
     return showGroupHome();
   }).catch(function (e) {
+    if (e && e.net) { // 斷線不等於登入失效：保留代碼，網路回來再試
+      if (silent) return showOffline(function () { doLogin(code, true); }, '目前連不上伺服器，你的登入有保留，網路恢復後按「重試」。');
+      return showLogin(e.message);
+    }
     store('erCode', null);
     showLogin(silent ? '' : e.message);
   });
@@ -1194,7 +1246,7 @@ function showIntroPage() {
 }
 function beginPlay() {
   app.innerHTML = '<div class="play"><p>計時開始…</p></div>';
-  api('playBegin', S.play.id).then(applyPlayState).catch(fail);
+  api('playBegin', S.play.id).then(function (st) { savePlayRef(isOver(st)); applyPlayState(st); }).catch(fail);
 }
 function applyPlayState(st) {
   var P = S.play;
@@ -1556,6 +1608,7 @@ function askHint() {
 function showEnding(st) {
   clearTimers();
   var P = S.play;
+  savePlayRef(true);
   S.view = 'playEnd';
   var e = st.ending || {};
   var h = '<div class="play">' + certHtml(st) + '<div class="pcard"><h2>' + (st.result === 'escaped' ? '逃脫成功！' : '時間到') + '</h2>' + (e.image ? '<img src="' + e.image + '">' : '') + '<div class="txt">' + esc(e.text) + '</div>' +
@@ -1691,7 +1744,7 @@ var ACTIONS = {
   closeModal: function () { closeModal(); },
   login: function () { var c = document.getElementById('code').value.trim(); if (!c) return toast('請輸入代碼', 'err'); doLogin(c); },
   toPlay: function () { var c = document.getElementById('pcode').value.trim().toUpperCase(); if (!c) return toast('請輸入遊戲代碼', 'err'); showPlayEntry(c); },
-  toLogin: function () { S.play = null; S.me ? (S.me.role === 'admin' ? showAdmin() : S.me.role === 'teacher' ? showTeacherHome() : showGroupHome()) : showLogin(); },
+  toLogin: function () { S.play = null; store('erPlay', null); S.me ? (S.me.role === 'admin' ? showAdmin() : S.me.role === 'teacher' ? showTeacherHome() : showGroupHome()) : showLogin(); },
   logout: function () { leaveEditor().then(function () { store('erCode', null); S.me = null; S.code = null; showLogin(); }); },
   editRoom: function () { openRoomEditor(); },
   backRoom: function () { backFromRoom(); },
@@ -1781,7 +1834,7 @@ var ACTIONS = {
     var members = [].map.call(document.querySelectorAll('#mem input'), function (x) { return x.value.trim(); }).filter(function (x) { return x; });
     if (!members.length) { document.getElementById('pmsg').textContent = '請至少輸入一位闖關成員的名字'; return; }
     el.disabled = true;
-    api('playStart', el.getAttribute('data-code'), team, members).then(enterPlay).catch(function (e) { el.disabled = false; document.getElementById('pmsg').textContent = e.message; });
+    api('playStart', el.getAttribute('data-code'), team, members).then(function (intro) { S.playCode = el.getAttribute('data-code'); enterPlay(intro); }).catch(function (e) { el.disabled = false; document.getElementById('pmsg').textContent = e.message; });
   },
   addMember: function () {
     var box = document.getElementById('mem');

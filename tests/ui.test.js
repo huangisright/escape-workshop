@@ -518,3 +518,68 @@ test('提示可以放圖片：老師上傳 → 玩家看提示時看到圖', { s
     await browser.close();
   }
 });
+
+test('玩到一半頁面被手機回收：重開後接回同一場，不會跳回登入頁；斷線時不踢人', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const { page, errors } = await openPage(browser, { width: 390, height: 800 });
+    const A = await seed(page);
+    const playCode = await page.evaluate((A) => {
+      const room = GAS('allDocs_')('Rooms').filter((r) => r.kind === 'teacher')[0];
+      const bank = GAS('allDocs_')('Puzzles');
+      const ids = ['空氣塔', '潮汐塔', '冰山塔'].map((t) => bank.filter((p) => p.title === t)[0].id);
+      GAS('adminSetRoomPuzzles')(A, room.id, ids, { fragments: ['7', '3', '1'] });
+      GAS('adminRoomAction')(A, room.id, 'publish');
+      return GAS('getDoc_')('Rooms', room.id).playCode;
+    }, A);
+
+    // 玩家用代碼進來、解開第一題
+    await page.fill('#pcode', playCode);
+    await click(page, '[data-act=toPlay]');
+    await page.fill('#team', '回收隊');
+    await page.fill('#mem input', '小明');
+    await click(page, '[data-act=playStart]');
+    await page.waitForSelector('[data-act=introNext]');
+    while (await page.locator('[data-act=introNext]').count()) await click(page, '[data-act=introNext]');
+    await page.waitForSelector('#barIdx');
+    await page.fill('#ans', 'air');
+    await click(page, '#goBtn');
+    await page.waitForFunction(() => /^已過 1 \/ 3 題$|第 2 \/ 3 題/.test(document.getElementById('barIdx').textContent));
+    const before = await page.textContent('#barIdx');
+
+    // 模擬手機把分頁回收：記憶體裡的狀態全沒了，只剩 localStorage，然後重新啟動
+    await page.evaluate(() => { S.play = null; clearTimers(); document.getElementById('app').innerHTML = ''; boot(); });
+    await page.waitForSelector('#barIdx');
+    assert.equal(await page.textContent('#barIdx'), before, '接回同一場，進度還在');
+    assert.equal(await page.locator('#code').count(), 0, '沒有跳回登入頁');
+
+    // 重開時剛好沒網路：顯示重試畫面，不清掉進度；網路回來後按重試就接回
+    await page.context().setOffline(true);
+    await page.evaluate(() => {
+      window.__realGAS = window.GAS;
+      window.GAS = function () { throw new Error('Failed to fetch'); };
+      S.play = null; clearTimers(); boot();
+    });
+    await page.waitForSelector('#retryBtn');
+    assert.match(await page.textContent('#app'), /目前連不上網路/);
+    assert.ok(await page.evaluate(() => !!localStorage.getItem('erPlay')), '斷線時不能把進行中的遊戲清掉');
+    await page.evaluate(() => { window.GAS = window.__realGAS; });
+    await page.context().setOffline(false); // 網路一恢復就會自動重試，不用按鈕
+    await page.waitForSelector('#barIdx');
+    assert.equal(await page.textContent('#barIdx'), before);
+
+    // 一般登入也一樣：斷線不清掉登入代碼
+    await page.evaluate(() => { S.play = null; store('erPlay', null); store('erCode', 'ABC123'); });
+    await page.context().setOffline(true);
+    await page.evaluate(() => { window.GAS = function () { throw new Error('Failed to fetch'); }; clearTimers(); boot(); });
+    await page.waitForSelector('#retryBtn');
+    assert.equal(await page.evaluate(() => localStorage.getItem('erCode')), 'ABC123', '斷線不清登入代碼');
+    await page.evaluate(() => { window.GAS = window.__realGAS; });
+    await page.context().setOffline(false);
+
+    // 離開遊戲後不會再被接回
+    await page.evaluate(() => { store('erCode', null); clearTimers(); boot(); });
+    await page.waitForSelector('#code');
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});

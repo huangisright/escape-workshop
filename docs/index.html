@@ -794,7 +794,7 @@ function blockEditorHtml(b, i, ro) {
   if (b.type === 'image') {
     if (b.fileId) h += '<img class="thumb" data-file="' + esc(b.fileId) + '" alt="圖片">';
     if (!ro) h += '<input type="file" accept="image/*" data-upload="block" data-i="' + i + '">';
-    h += '<label class="f">圖說（選填）</label><input type="text" data-f="blocks.' + i + '.caption" value="' + esc(b.caption) + '"' + dis + '>';
+    h += '<label class="f">圖說：玩家會看到，不需要就留白</label><input type="text" data-f="blocks.' + i + '.caption" value="' + esc(b.caption) + '" placeholder="例如：注意右下角的數字"' + dis + '>';
   }
   if (b.type === 'audio') {
     if (b.fileId) h += '<audio controls data-file="' + esc(b.fileId) + '" style="width:100%"></audio>';

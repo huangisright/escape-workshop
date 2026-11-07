@@ -553,6 +553,21 @@ test('玩到一半頁面被手機回收：重開後接回同一場，不會跳�
     assert.equal(await page.textContent('#barIdx'), before, '接回同一場，進度還在');
     assert.equal(await page.locator('#code').count(), 0, '沒有跳回登入頁');
 
+    // 另開分頁（同一台電腦，例如老師要登入後台）：不直接拉進遊戲，讓人選
+    // 另一個分頁沒有這個分頁的記號（sessionStorage 每個分頁各自一份）
+    await page.evaluate(() => { sessionStorage.clear(); S.play = null; clearTimers(); boot(); });
+    await page.waitForSelector('[data-act=resumeNo]');
+    await shot(page, 'r0-resume-choice');
+    await click(page, '[data-act=resumeYes]');
+    await page.waitForSelector('#barIdx');
+    assert.equal(await page.textContent('#barIdx'), before, '選繼續遊戲就接回同一場');
+    await page.evaluate(() => { sessionStorage.clear(); S.play = null; clearTimers(); boot(); });
+    await click(page, '[data-act=resumeNo]');
+    await page.waitForSelector('#code');
+    assert.ok(await page.evaluate(() => !!localStorage.getItem('erPlay')), '選登入頁不會結束那場遊戲');
+    await page.evaluate(() => { sessionStorage.setItem('erPlayTab', JSON.parse(localStorage.getItem('erPlay')).id); S.play = null; clearTimers(); boot(); });
+    await page.waitForSelector('#barIdx');
+
     // 重開時剛好沒網路：顯示重試畫面，不清掉進度；網路回來後按重試就接回
     await page.context().setOffline(true);
     await page.evaluate(() => {

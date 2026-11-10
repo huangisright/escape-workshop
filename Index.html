@@ -196,6 +196,10 @@ body.playing{background:#12161b;color:#eef0f2}
 .busy::after{content:"";position:absolute;right:8px;top:50%;width:14px;height:14px;margin-top:-7px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
 #netbar{position:fixed;left:0;top:0;height:3px;width:100%;z-index:100;pointer-events:none;opacity:0;transition:opacity .2s;background:linear-gradient(90deg,transparent,var(--acc),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:netbar 1s linear infinite}
 #netbar.on{opacity:1}
+#offbar{position:fixed;left:0;right:0;top:0;z-index:99;pointer-events:none;display:flex;justify-content:center}
+.offb{pointer-events:auto;font-size:14px;padding:6px 14px;border-radius:0 0 10px 10px;color:#fff;max-width:640px;text-align:center}
+.offb.warn{background:#b45309}.offb.bad{background:#b91c1c}.offb.ok{background:#15803d}.offb.wait{background:#475569}
+.offb.chip{font-size:12px;padding:2px 10px;opacity:.9}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes netbar{from{background-position:-40% 0}to{background-position:140% 0}}
 </style>
@@ -205,6 +209,7 @@ body.playing{background:#12161b;color:#eef0f2}
 <div id="app"></div>
 <div id="toast"></div>
 <div id="netbar"></div>
+<div id="offbar"></div>
 <div id="modal"></div>
 <script>
 /* ============================================================
@@ -246,12 +251,21 @@ function api(fn) {
 function netErr(msg) { var e = new Error(msg); e.net = true; return e; }
 function apiRaw(fn) {
   var args = Array.prototype.slice.call(arguments, 1);
+  if (!PLAY_FNS[fn]) return apiNet.apply(null, [fn].concat(args));
+  return OFF.call(fn, args);
+}
+function apiNet(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
   if (window.ER_API) { // 放在 GitHub Pages 時：直接呼叫 Apps Script 的 API，不帶 Google 登入資訊
+    // 玩的時候網路若是「連著 Wi-Fi 但實際不通」，fetch 會卡很久：超過 15 秒就當作斷線，改用離線備援
+    var ctl = (PLAY_FNS[fn] || fn === 'playSync') && window.AbortController ? new AbortController() : null;
+    var tm = ctl ? setTimeout(function () { ctl.abort(); }, PLAY_FNS[fn] ? 15000 : 30000) : 0;
     return fetch(window.ER_API, {
       method: 'POST', credentials: 'omit', redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ fn: fn, args: args })
-    }).then(function (r) {
+      body: JSON.stringify({ fn: fn, args: args }),
+      signal: ctl ? ctl.signal : undefined
+    }).then(function (r) { clearTimeout(tm); return r; }, function (e) { clearTimeout(tm); throw e; }).then(function (r) {
       if (!r.ok) throw netErr('連線失敗（' + r.status + '），請稍後再試');
       return r.json().catch(function () { throw netErr('連線不穩，請稍後再試'); });
     }, function () { throw netErr('連不上伺服器，請檢查網路後再試'); }).then(function (j) {
@@ -299,6 +313,353 @@ function confirmBox(msg, okText) {
   });
 }
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
+/* ============================================================
+   離線備援
+   平常一律連線玩（伺服器判斷答案與計時）。玩到一半斷線時，改用 iPad 上的題目包繼續玩，
+   進度存在這台裝置；網路回來就把進度和紀錄回傳，之後又回到連線模式。
+   題目包裡只有答案的加鹽雜湊。只支援一般與自由選題；有終章、跳過、寶庫的密室一律要連網。
+   ============================================================ */
+var PLAY_FNS = { playState: 1, playBegin: 1, playOpen: 1, playAnswer: 1, playHint: 1, playHintImage: 1, playRate: 1, playSkip: 1, playFinish: 1 };
+function sha256hex(ascii) {
+  function rr(v, a) { return (v >>> a) | (v << (32 - a)); }
+  var mw = Math.pow(2, 32), i, j, result = '', words = [], bitLen = ascii.length * 8;
+  var hash = sha256hex.h = sha256hex.h || [], k = sha256hex.k = sha256hex.k || [], pc = k.length, comp = {};
+  for (var cand = 2; pc < 64; cand++) {
+    if (!comp[cand]) {
+      for (i = 0; i < 313; i += cand) comp[i] = cand;
+      hash[pc] = (Math.pow(cand, 0.5) * mw) | 0;
+      k[pc++] = (Math.pow(cand, 1 / 3) * mw) | 0;
+    }
+  }
+  ascii += '\x80';
+  while (ascii.length % 64 - 56) ascii += '\x00';
+  for (i = 0; i < ascii.length; i++) { j = ascii.charCodeAt(i); words[i >> 2] |= j << ((3 - i) % 4) * 8; }
+  words[words.length] = ((bitLen / mw) | 0);
+  words[words.length] = bitLen;
+  for (j = 0; j < words.length;) {
+    var w = words.slice(j, j += 16), old = hash;
+    hash = hash.slice(0, 8);
+    for (i = 0; i < 64; i++) {
+      var w15 = w[i - 15], w2 = w[i - 2], a = hash[0], e = hash[4];
+      var t1 = hash[7] + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & hash[5]) ^ ((~e) & hash[6])) + k[i] +
+        (w[i] = (i < 16) ? w[i] : (w[i - 16] + (rr(w15, 7) ^ rr(w15, 18) ^ (w15 >>> 3)) + w[i - 7] + (rr(w2, 17) ^ rr(w2, 19) ^ (w2 >>> 10))) | 0);
+      var t2 = (rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+      hash = [(t1 + t2) | 0].concat(hash);
+      hash[4] = (hash[4] + t1) | 0;
+    }
+    for (i = 0; i < 8; i++) hash[i] = (hash[i] + old[i]) | 0;
+  }
+  for (i = 0; i < 8; i++) for (j = 3; j + 1; j--) { var b = (hash[i] >> (j * 8)) & 255; result += (b < 16 ? '0' : '') + b.toString(16); }
+  return result;
+}
+/** 和 Code.gs 的 norm_ 一模一樣 */
+function offNorm(s) {
+  s = String(s === null || s === undefined ? '' : s);
+  try { s = s.normalize('NFKC'); } catch (e) { }
+  s = s.replace(/[！-～]/g, function (ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); }).replace(/　/g, ' ');
+  return s.toLowerCase().replace(/臺/g, '台').replace(/[\s，,。．.、；;：:！!？?「」『』“”"'‘’（）()【】\[\]]/g, '');
+}
+function offHash(salt, ans) { return sha256hex(unescape(encodeURIComponent(salt + '|' + offNorm(ans)))); }
+
+var OFF = { mode: 'online', playId: '', st: null, result: '', ended: '', team: '', clockOff: 0, events: [], rates: [], bundle: null, status: 'none', err: '', synced: 0, restored: false, probe: null, loading: false };
+var OFF_IDB = { db: null };
+function offIdb() {
+  return new Promise(function (res, rej) {
+    if (OFF_IDB.db) return res(OFF_IDB.db);
+    try {
+      var q = indexedDB.open('erOffline', 1);
+      q.onupgradeneeded = function () { q.result.createObjectStore('bundle'); };
+      q.onsuccess = function () { OFF_IDB.db = q.result; res(q.result); };
+      q.onerror = function () { rej(q.error); };
+    } catch (e) { rej(e); }
+  });
+}
+function offIdbGet(k) { return offIdb().then(function (db) { return new Promise(function (res, rej) { var r = db.transaction('bundle').objectStore('bundle').get(k); r.onsuccess = function () { res(r.result || null); }; r.onerror = function () { rej(r.error); }; }); }); }
+function offIdbPut(k, v) { return offIdb().then(function (db) { return new Promise(function (res, rej) { var t = db.transaction('bundle', 'readwrite'); t.objectStore('bundle').put(v, k); t.oncomplete = function () { res(); }; t.onerror = function () { rej(t.error); }; }); }); }
+function offIdbClear(keep) { return offIdb().then(function (db) { var t = db.transaction('bundle', 'readwrite'), s = t.objectStore('bundle'); s.openCursor().onsuccess = function (e) { var c = e.target.result; if (c) { if (c.key !== keep) c.delete(); c.continue(); } }; }).catch(function () { }); }
+
+OFF.now = function () { return Date.now() + OFF.clockOff; };
+OFF.iso = function () { return new Date(OFF.now()).toISOString(); };
+OFF.dirty = function () { return !!(OFF.st && OFF.pending); };
+OFF.save = function () {
+  if (!OFF.st) return;
+  store('erOff', JSON.stringify({ playId: OFF.playId, st: OFF.st, result: OFF.result, ended: OFF.ended, team: OFF.team, clockOff: OFF.clockOff, events: OFF.events, rates: OFF.rates, pending: !!OFF.pending, mode: OFF.mode, at: Date.now() }));
+};
+OFF.restore = function () {
+  var d = null;
+  try { d = JSON.parse(store('erOff') || 'null'); } catch (e) { }
+  if (!d || !d.playId || !d.st) return;
+  if (!d.pending && Date.now() - (d.at || 0) > 8 * 3600 * 1000) { store('erOff', null); return; }
+  OFF.playId = d.playId; OFF.st = d.st; OFF.result = d.result || ''; OFF.ended = d.ended || ''; OFF.team = d.team || '';
+  OFF.clockOff = d.clockOff || 0; OFF.events = d.events || []; OFF.rates = d.rates || []; OFF.pending = !!d.pending;
+  OFF.mode = d.mode === 'local' ? 'local' : 'online';
+  OFF.restored = true;
+  if (OFF.mode === 'local' || OFF.pending) { OFF.mode = 'local'; OFF.startProbe(); }
+  OFF.bundleP = OFF.loadBundle();
+};
+/** 每次從伺服器拿到狀態：記下最新的完整進度，讓斷線時可以從這裡接著算 */
+OFF.track = function (st) {
+  if (!st || !st.sync || OFF.mode === 'local') return;
+  if (OFF.playId && OFF.playId !== st.playId) { OFF.bundle = null; OFF.status = 'none'; }
+  OFF.playId = st.playId;
+  OFF.st = JSON.parse(JSON.stringify(st.sync.st));
+  OFF.result = st.sync.result || ''; OFF.ended = st.sync.ended || ''; OFF.team = st.sync.team || '';
+  OFF.clockOff = st.sync.serverNow - Date.now();
+  OFF.save();
+  OFF.ensureBundle();
+};
+OFF.loadBundle = function () {
+  if (!OFF.playId || OFF.bundle) return Promise.resolve();
+  var id = OFF.playId;
+  return offIdbGet('b:' + id).then(function (b) {
+    if (b && OFF.playId === id && !OFF.bundle) { OFF.bundle = b; OFF.status = b.capable ? 'ready' : 'unsupported'; OFF.paint(); }
+  }).catch(function () { });
+};
+OFF.ensureBundle = function () {
+  var id = OFF.playId;
+  if (!id || OFF.loading || (OFF.bundle && OFF.bundle.playId === id)) return;
+  OFF.loading = true;
+  if (OFF.status !== 'ready') { OFF.status = 'loading'; OFF.paint(); }
+  OFF.loadBundle().then(function () {
+    if (OFF.bundle && OFF.bundle.playId === id) { OFF.loading = false; return; }
+    return apiNet('playBundle', id).then(function (b) {
+      b.playId = id;
+      OFF.bundle = b; OFF.status = b.capable ? 'ready' : 'unsupported';
+      OFF.loading = false; OFF.paint();
+      offIdbPut('b:' + id, b).then(function () { return offIdbClear('b:' + id); }).catch(function () { OFF.status = b.capable ? 'memory' : 'unsupported'; OFF.paint(); });
+    });
+  }).catch(function () {
+    OFF.loading = false; OFF.status = 'error'; OFF.paint();
+    setTimeout(function () { if (OFF.status === 'error') OFF.ensureBundle(); }, 15000);
+  });
+};
+OFF.canLocal = function (playId) {
+  return !!(OFF.st && OFF.playId === playId && Number(OFF.st.startMs) > 0 && OFF.bundle && OFF.bundle.capable && OFF.bundle.snap === OFF.st.snap);
+};
+/** 所有「遊玩」呼叫都從這裡走：先連線，連不上而且有題目包，就改用本機 */
+OFF.call = function (fn, args) {
+  var playId = args[0];
+  return (OFF.bundleP || Promise.resolve()).then(function () {
+    return OFF.mode === 'local' && OFF.restored ? (OFF.restored = false, OFF.trySync()) : null;
+  }).then(function () {
+    if (OFF.mode === 'local') return OFF.local(fn, args);
+    return apiNet.apply(null, [fn].concat(args)).then(function (r) { OFF.observe(r); return r; }, function (e) {
+      if (!(e && e.net) || fn === 'playBegin' || !OFF.canLocal(playId)) throw e;
+      OFF.goLocal();
+      return OFF.local(fn, args);
+    });
+  });
+};
+OFF.observe = function (r) {
+  if (!r || typeof r !== 'object') return;
+  var st = r.sync ? r : r.state;
+  if (st && st.sync) OFF.track(st);
+};
+OFF.goLocal = function () {
+  OFF.mode = 'local';
+  OFF.st.v = (Number(OFF.st.v) || 0) + 1000; // 剛才那次連線失敗不知道伺服器有沒有收到，以這台裝置的進度為準
+  OFF.pending = true;
+  OFF.save(); OFF.startProbe(); OFF.paint();
+};
+OFF.startProbe = function () {
+  if (OFF.probe) return;
+  OFF.probe = setInterval(function () { OFF.trySync(); }, 6000);
+  window.addEventListener('online', function () { OFF.trySync(); });
+};
+OFF.trySync = function () {
+  if (OFF.mode !== 'local' || OFF.syncing || !OFF.st) return Promise.resolve();
+  OFF.syncing = true;
+  var payload = { st: OFF.st, result: OFF.result, ended: OFF.ended, events: OFF.events };
+  return apiNet('playSync', OFF.playId, payload).then(function (r) {
+    OFF.syncing = false;
+    OFF.err = '';
+    var state = r.state;
+    OFF.events = []; OFF.pending = false; OFF.mode = 'online';
+    OFF.synced = Date.now();
+    OFF.track(state);
+    var rates = OFF.rates; OFF.rates = []; OFF.save();
+    rates.forEach(function (x) { apiNet('playRate', OFF.playId, x.list, x.liked, x.stuck).catch(function () { OFF.rates.push(x); OFF.save(); }); });
+    if (r.stale && S.play && S.play.id === OFF.playId) applyPlayState(state);
+    OFF.paint();
+    setTimeout(OFF.paint, 6000);
+  }, function (e) {
+    OFF.syncing = false;
+    if (e && !e.net) OFF.err = e.message || '回傳失敗';
+    OFF.paint();
+  });
+};
+/* ---------- 本機判題（照 Code.gs 的 playAnswer / playHint / playOpen 一比一搬過來） ---------- */
+OFF.puzzle = function (i) { return OFF.bundle.puzzles[i]; };
+OFF.elapsedMs = function () { return OFF.now() - OFF.st.startMs + (Number(OFF.st.penaltySec) || 0) * 1000; };
+OFF.ev = function (pid, type, value, elapsed) { OFF.events.push({ ts: OFF.iso(), puzzleId: pid || '', type: type, value: value === undefined ? '' : value, elapsed: elapsed === undefined ? '' : elapsed }); };
+OFF.ps = function () {
+  var n = OFF.bundle.puzzles.length, ps = OFF.st.ps = OFF.st.ps || [];
+  for (var i = 0; i < n; i++) if (!ps[i]) ps[i] = { gate: 0, hints: 0, spent: 0, done: '', opened: false };
+  return ps;
+};
+OFF.active = function () { return !OFF.result; };
+OFF.checkTimeout = function () {
+  if (!OFF.st.startMs || OFF.result) return;
+  if (OFF.elapsedMs() <= OFF.bundle.room.limitSec * 1000) return;
+  OFF.result = 'timeout'; OFF.ended = OFF.iso();
+  OFF.ev(OFF.puzzle(OFF.st.index).id, 'end', 'timeout', Math.round((OFF.now() - OFF.st.puzzleStart) / 1000));
+};
+OFF.reset = function () { var st = OFF.st; st.gate = 0; st.hints = 0; st.cooldownUntil = 0; st.puzzleStart = OFF.now(); };
+OFF.openPuzzle = function (i) {
+  var st = OFF.st, e = OFF.ps()[i];
+  st.index = i; st.gate = e.gate || 0; st.hints = e.hints || 0; st.puzzleStart = OFF.now() - (e.spent || 0);
+  if (!e.opened) { e.opened = true; OFF.ev(OFF.puzzle(i).id, 'open', '', 0); }
+};
+OFF.escape = function () {
+  var st = OFF.st;
+  OFF.result = 'escaped'; OFF.ended = OFF.iso();
+  st.escapeSec = Math.round(OFF.elapsedMs() / 1000);
+  OFF.ev(OFF.puzzle(st.index).id, 'end', 'escaped', st.escapeSec);
+  st.phase = 'done';
+};
+OFF.advance = function () {
+  var st = OFF.st, B = OFF.bundle;
+  if (B.room.free) {
+    var ps = OFF.ps(), i0 = st.index;
+    ps[i0].done = 'solved'; ps[i0].gate = 0;
+    var next = -1;
+    for (var k = 1; k <= ps.length; k++) { var j = (i0 + k) % ps.length; if (!ps[j].done) { next = j; break; } }
+    if (next < 0) OFF.escape(); else { st.cooldownUntil = 0; OFF.openPuzzle(next); }
+  } else if (st.index >= B.puzzles.length - 1) OFF.escape();
+  else { st.index++; OFF.reset(); }
+};
+OFF.stateOut = function (have) {
+  var st = OFF.st, B = OFF.bundle, R = B.room, ps = B.puzzles, over = !!OFF.result;
+  var elapsed = Math.floor(OFF.elapsedMs() / 1000);
+  var out = {
+    playId: OFF.playId, test: false, result: OFF.result, over: over, total: ps.length, index: st.index,
+    remainingSec: Math.max(0, R.limitSec - elapsed), elapsedSec: elapsed, phase: st.phase || 'main',
+    finale: false, fragments: [], skipMin: 0, skips: 0, penaltySec: 0, vaultTotal: 0, vaultIndex: 0, vaultSolved: 0,
+    escapeSec: st.escapeSec === undefined ? null : st.escapeSec, free: R.free, theme: R.theme, local: true
+  };
+  if (ps.some(function (p) { return p.place; })) out.places = ps.map(function (p, i) { return { no: i + 1, title: p.title, place: p.place || '' }; });
+  var psx = R.free ? OFF.ps() : null;
+  if (R.free) {
+    out.solvedCount = psx.filter(function (e) { return !!e.done; }).length;
+    if (!over) out.board = ps.map(function (p, i) { return { no: i + 1, title: p.title, status: psx[i].done || (i === st.index ? 'current' : psx[i].opened ? 'opened' : 'new') }; });
+  }
+  if (over) {
+    if (out.escapeSec !== null) out.elapsedSec = out.escapeSec;
+    var ending = OFF.result === 'escaped' ? R.success : R.fail;
+    out.ending = { text: ending.text || '', image: ending.image };
+    var ss = st.solveSec || {};
+    var d = new Date(OFF.ended || OFF.iso());
+    var date = ''; try { date = d.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: 'numeric', day: 'numeric' }); } catch (e) { date = (d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate()); }
+    out.cert = { room: R.title, team: OFF.team, members: st.members || [], date: date,
+      puzzles: ps.map(function (p) { return { title: p.title, author: p.author || '', sec: ss[p.id] === undefined ? null : ss[p.id] }; }) };
+    var item = function (p, i) { return { id: p.id, no: i + 1, title: p.title, author: p.author || '' }; };
+    if (OFF.result === 'escaped') out.rateList = ps.map(item);
+    else if (R.free) out.rateList = ps.map(item).filter(function (q, i) { return psx[i].opened || psx[i].done || i === st.index; });
+    else out.rateList = ps.slice(0, Math.min(ps.length, st.index + 1)).map(item);
+    return out;
+  }
+  var p = OFF.puzzle(st.index), g = p.gates[st.gate];
+  var since = Math.floor((OFF.now() - st.puzzleStart) / 1000);
+  out.puzzleId = p.id; out.title = p.title; out.place = p.place || '';
+  out.gate = st.gate; out.gateCount = p.gates.length; out.gateLabel = g.label;
+  out.hintsShown = p.hints.slice(0, st.hints).map(function (h) { return h.text; });
+  out.hintImgs = p.hints.slice(0, st.hints).map(function (h) { return !!h.img; });
+  out.hintTotal = p.hints.length;
+  out.nextHintInSec = st.hints < p.hints.length ? Math.max(0, p.hints[st.hints].delaySec - since) : -1;
+  out.cooldownSec = Math.max(0, Math.ceil((st.cooldownUntil - OFF.now()) / 1000));
+  out.canSkip = false;
+  if (have !== p.id) out.blocks = p.blocks;
+  return out;
+};
+OFF.local = function (fn, args) {
+  var st = OFF.st, B = OFF.bundle;
+  if (!OFF.canLocal(args[0])) return Promise.reject(netErr('離線備援還沒準備好，請連上網路後再試'));
+  var res;
+  try { res = OFF.localRun(fn, args, st, B); } catch (e) { return Promise.reject(e); }
+  OFF.save(); OFF.paint();
+  return Promise.resolve(res);
+};
+OFF.localRun = function (fn, args, st, B) {
+  if (fn === 'playState' || fn === 'playBegin') { OFF.checkTimeout(); return OFF.stateOut(args[1]); }
+  if (fn === 'playHintImage') {
+    var p0 = OFF.puzzle(st.index), n = Number(args[1]);
+    if (!(n >= 0 && n < st.hints && n < p0.hints.length)) throw new Error('這層提示還沒開放');
+    return { puzzleId: p0.id, n: n, src: p0.hints[n].img || '' };
+  }
+  if (fn === 'playRate') { OFF.rates.push({ list: args[1], liked: args[2], stuck: args[3] }); return true; }
+  if (fn === 'playSkip' || fn === 'playFinish') throw new Error('離線時不能使用這個功能');
+  OFF.checkTimeout();
+  if (!OFF.active()) return fn === 'playOpen' ? OFF.stateOut('*') : { state: OFF.stateOut('*') };
+  var p = OFF.puzzle(st.index);
+  if (fn === 'playOpen') {
+    var i = Number(args[1]);
+    if (!B.room.free) throw new Error('這個密室要依序解題');
+    if (!(i >= 0 && i < B.puzzles.length) || Math.floor(i) !== i) throw new Error('沒有這一題');
+    if (OFF.ps()[i].done) throw new Error('這一題已經過關了');
+    if (i !== st.index) {
+      var e0 = OFF.ps()[st.index];
+      e0.gate = st.gate || 0; e0.hints = st.hints || 0; e0.spent = Math.max(0, OFF.now() - (st.puzzleStart || OFF.now()));
+      OFF.openPuzzle(i);
+    }
+    return OFF.stateOut(null);
+  }
+  if (fn === 'playHint') {
+    var since0 = Math.floor((OFF.now() - st.puzzleStart) / 1000);
+    if (st.hints < p.hints.length && since0 >= p.hints[st.hints].delaySec) {
+      st.hints++;
+      OFF.ev(p.id, 'hint', st.hints, since0);
+    }
+    return { state: OFF.stateOut(p.id) };
+  }
+  if (fn === 'playAnswer') {
+    var answer = args[1];
+    if (OFF.now() < st.cooldownUntil) return { wait: true, state: OFF.stateOut(p.id) };
+    var g = p.gates[st.gate], h = offHash(B.salt, answer), n2 = offNorm(answer);
+    var ok = n2.length > 0 && g.hashes.indexOf(h) >= 0;
+    var since = Math.round((OFF.now() - st.puzzleStart) / 1000);
+    var r = { correct: ok };
+    if (!ok) {
+      st.cooldownUntil = OFF.now() + B.room.cooldownSec * 1000;
+      st.wrong = (st.wrong || 0) + 1;
+      OFF.ev(p.id, 'wrong', String(answer).substring(0, 60), since);
+      r.state = OFF.stateOut(p.id);
+      return r;
+    }
+    if (st.gate < p.gates.length - 1) {
+      st.gate++;
+      OFF.ev(p.id, 'gate', g.label, since);
+      r.gatePassed = true; r.state = OFF.stateOut(p.id);
+      return r;
+    }
+    OFF.ev(p.id, 'solve', '', since);
+    st.solveSec = st.solveSec || {}; st.solveSec[p.id] = since;
+    r.solved = true;
+    OFF.advance();
+    r.fragment = null;
+    r.escaped = OFF.result === 'escaped';
+    r.state = OFF.stateOut(null);
+    return r;
+  }
+  throw new Error('離線時不支援：' + fn);
+};
+/* ---------- 畫面上的提示 ---------- */
+OFF.paint = function () {
+  var el = document.getElementById('offbar');
+  if (!el) return;
+  var playing = S.play && (S.view === 'play' || S.view === 'playEnd');
+  var h = '';
+  if (OFF.err && OFF.pending) h = '<div class="offb bad">離線進度回傳失敗：' + esc(OFF.err) + '。請找老師，先不要關掉這個畫面。</div>';
+  else if (OFF.mode === 'local' && OFF.result) h = '<div class="offb bad">成績還沒回傳。請連上網路並保持這個畫面開著，不要清除瀏覽器資料。</div>';
+  else if (OFF.mode === 'local') h = '<div class="offb warn">目前沒有網路，繼續用這台 iPad 玩。進度會留著，連上網路後自動回傳。</div>';
+  else if (OFF.synced && Date.now() - OFF.synced < 6000) h = '<div class="offb ok">✓ 網路恢復，進度與成績已回傳</div>';
+  else if (playing && OFF.playId === S.play.id) {
+    var t = { loading: ['wait', '離線備援準備中…（請先不要離開有網路的地方）'], ready: ['ok', '離線備援已就緒'], memory: ['warn', '離線備援暫存中（重新整理後會失效）'],
+      error: ['warn', '離線備援還沒準備好，正在重試…'], unsupported: ['warn', '這間密室需要全程連網'] }[OFF.status];
+    if (t) h = '<div class="offb chip ' + t[0] + '">' + t[1] + '</div>';
+  }
+  el.innerHTML = h;
+};
+
 /* 進行中的遊戲記在手機裡：手機待機、瀏覽器把分頁回收、重新整理之後，都能接回同一場 */
 function savePlayRef(end) {
   var P = S.play;
@@ -524,6 +885,9 @@ function prepareHtml(file) {
    啟動與登入
    ============================================================ */
 function boot() {
+  OFF.restore();
+  // 放在 GitHub Pages 時註冊 service worker：之後即使沒網路，重新整理也打得開這一頁
+  if (window.ER_API && 'serviceWorker' in navigator && !boot.sw) { boot.sw = 1; try { navigator.serviceWorker.register('sw.js').catch(function () { }); } catch (e) { } }
   var go = function (params) {
     params = params || {};
     var ref = loadPlayRef();
@@ -1272,6 +1636,7 @@ function enterPlay(intro) {
   S.play = { id: intro.playId, intro: intro, test: intro.test, page: 0, pid: null, blocks: null, deadline: 0, hintAt: 0, coolAt: 0, rate: {} };
   document.body.className = 'playing';
   S.view = 'play';
+  if (intro.resumed) return beginPlay(); // 同隊名還在進行中：接回原本那場，不重看封面也不重新計時
   showIntroPage();
 }
 function introPages() {
@@ -1295,6 +1660,7 @@ function beginPlay() {
 function applyPlayState(st) {
   var P = S.play;
   P.state = st;
+  OFF.paint();
   P.deadline = Date.now() + st.remainingSec * 1000;
   if (isOver(st)) return showEnding(st);
   if (st.blocks) { P.blocks = st.blocks; P.pid = st.puzzleId; }
@@ -1673,6 +2039,7 @@ function showEnding(st) {
   var P = S.play;
   savePlayRef(true);
   S.view = 'playEnd';
+  setTimeout(OFF.paint, 0);
   var e = st.ending || {};
   var h = '<div class="play">' + certHtml(st) + '<div class="pcard"><h2>' + (st.result === 'escaped' ? '逃脫成功！' : '時間到') + '</h2>' + (e.image ? '<img src="' + e.image + '">' : '') + '<div class="txt">' + esc(e.text) + '</div>' +
     '<p style="color:#aab3bd">用時 ' + fmtSec(st.elapsedSec) + (st.penaltySec ? '（含跳過扣時 ' + Math.round(st.penaltySec / 60) + ' 分鐘）' : '') +
@@ -1811,7 +2178,7 @@ var ACTIONS = {
   toPlay: function () { var c = document.getElementById('pcode').value.trim().toUpperCase(); if (!c) return toast('請輸入遊戲代碼', 'err'); showPlayEntry(c); },
   resumeYes: function () { resumePlay(S.resumeRef); },
   resumeNo: function () { var c = S.resumeParams.c || store('erCode'); c ? doLogin(c, true) : showLogin(); },
-  toLogin: function () { S.play = null; store('erPlay', null); S.me ? (S.me.role === 'admin' ? showAdmin() : S.me.role === 'teacher' ? showTeacherHome() : showGroupHome()) : showLogin(); },
+  toLogin: function () { if (OFF.pending && !OFF.err) return toast('成績還沒回傳，請先連上網路，等畫面上方出現「已回傳」再離開', 'err'); S.play = null; store('erPlay', null); S.me ? (S.me.role === 'admin' ? showAdmin() : S.me.role === 'teacher' ? showTeacherHome() : showGroupHome()) : showLogin(); },
   logout: function () { leaveEditor().then(function () { store('erCode', null); S.me = null; S.code = null; showLogin(); }); },
   editRoom: function () { openRoomEditor(); },
   backRoom: function () { backFromRoom(); },

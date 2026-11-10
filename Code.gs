@@ -55,7 +55,7 @@ function doGet(e) {
  */
 var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
-  'playStart', 'startTestPlay', 'playBegin', 'playState', 'playOpen', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playHintImage', 'playRate',
+  'playStart', 'startTestPlay', 'playBegin', 'playState', 'playOpen', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playHintImage', 'playRate', 'playBundle', 'playSync',
   'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminSetRoomPlaces', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
@@ -916,6 +916,7 @@ function findPlay_(playId) {
   return r;
 }
 function savePlay_(r) {
+  r.st.v = (Number(r.st.v) || 0) + 1; // 每存一次加一：離線回傳時用來確認伺服器沒有被別處改過
   r.state = JSON.stringify(r.st);
   writeRow_('Plays', r._row, r);
 }
@@ -1096,7 +1097,30 @@ function playStart(playCode, team, members) {
   if (!room) throw new Error('遊戲代碼不正確，或這個密室還沒開放');
   members = cleanMembers_(members);
   if (!members.length) throw new Error('請至少輸入一位闖關成員的名字');
+  var again = findLivePlay_(room, team, members);
+  if (again) return again;
   return startPlay_(room, room.publishedVersion, team, false, members);
+}
+/** 同一個密室、同隊名還在進行中的遊戲：接回原本那場（計時照舊），不開新局。
+ *  隊名相同但成員完全對不上，視為別組撞名，請對方換隊名，避免搶走別人的進度。 */
+function findLivePlay_(room, team, members) {
+  var key = function (x) { return norm_(x); };
+  var rows = readAll_('Plays').filter(function (r) {
+    return r.roomId === room.id && key(r.team) === key(team) && !(r.test === true || r.test === '是') && !r.result;
+  });
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var r = findPlay_(rows[i].id);
+    if (!active_(r) || timeoutDue_(r)) continue;
+    var old = (r.st.members || []).map(key);
+    var same = members.some(function (m) { return old.indexOf(key(m)) >= 0; });
+    if (!same) throw new Error('「' + team + '」這個隊名正在被另一組使用，請換一個隊名');
+    var intro = introOf_(loadSnapshot_(r.st.snap));
+    intro.playId = r.id;
+    intro.test = false;
+    intro.resumed = !!r.st.startMs;
+    return intro;
+  }
+  return null;
 }
 function cleanMembers_(m) {
   return (Array.isArray(m) ? m : []).map(function (x) { return String(x || '').trim().substring(0, 20); })
@@ -1216,6 +1240,8 @@ function stateOf_(r, havePuzzleId) {
     escapeSec: r.st.escapeSec === undefined ? null : r.st.escapeSec,
     free: isFree_(snap), theme: snap.room.theme || 'island'
   };
+  // 離線備援用：完整進度與伺服器時間。斷線時 iPad 從這份進度接著算，不含任何答案
+  out.sync = { v: Number(r.st.v) || 0, st: r.st, result: r.result || '', ended: r.ended || '', team: r.team, serverNow: nowMs_() };
   // 關卡位置表：至少一題有填地點才給，舊快照沒有 places 就跟以前一樣
   var places = snap.room.places || {};
   if (snap.puzzles.some(function (p) { return places[p.id]; })) {
@@ -1408,6 +1434,79 @@ function playHintImage(playId, n) {
   if (!(n >= 0 && n < r.st.hints && n < hints.length)) throw new Error('這層提示還沒開放');
   if (!hints[n].imageId) return { puzzleId: p.id, n: n, src: '' };
   return { puzzleId: p.id, n: n, src: fileData_(hints[n].imageId).dataUrl };
+}
+
+/* ============================================================
+ *  離線備援：題目包與成績回傳
+ *  為了讓 iPad 在沒有網路時也能判斷答案，題目包裡放的是「答案加鹽雜湊」，不是明文答案。
+ *  只支援一般與自由選題；開了終章、跳過、寶庫的密室不提供（capable = false），一律要連網玩。
+ * ============================================================ */
+function hex_(bytes) {
+  return bytes.map(function (b) { b = b < 0 ? b + 256 : b; return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+}
+function ansHash_(salt, answer) {
+  return hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + '|' + norm_(answer), Utilities.Charset.UTF_8));
+}
+function playBundle(playId) {
+  var r = findPlay_(playId);
+  var snap = loadSnapshot_(r.st.snap);
+  var capable = !finaleOn_(snap) && !(Number(snap.room.skipMin) > 0) && !(snap.vault || []).length;
+  if (!capable) return { capable: false };
+  var salt = 'er:' + r.st.snap;
+  var places = snap.room.places || {};
+  return {
+    capable: true, salt: salt, snap: r.st.snap,
+    room: {
+      title: snap.room.title || '', free: isFree_(snap), theme: snap.room.theme || 'island',
+      limitSec: limitMs_(snap) / 1000, cooldownSec: settings_().wrongCooldownSec,
+      success: mediaPage_(snap.room.success), fail: mediaPage_(snap.room.fail)
+    },
+    puzzles: snap.puzzles.map(function (p) {
+      return {
+        id: p.id, title: p.title, author: p.author || '', place: places[p.id] || '',
+        blocks: renderBlocks_(p.blocks || []),
+        gates: gates_(p).map(function (g) {
+          return { label: g.label, hashes: g.answers.map(norm_).filter(function (x) { return x; }).map(function (x) { return ansHash_(salt, x); }) };
+        }),
+        hints: hintsOf_(p).map(function (h) {
+          var img = '';
+          if (h.imageId) { try { img = fileData_(h.imageId).dataUrl; } catch (e) { } }
+          return { text: String(h.text || ''), delaySec: Number(h.delaySec) || 0, img: img };
+        })
+      };
+    })
+  };
+}
+
+/** iPad 離線玩完（或半途）後回傳：伺服器確認這是同一場、沒被別處改過，才收下進度與事件紀錄 */
+function playSync(playId, payload) {
+  return withLock_(function () {
+    var r = findPlay_(playId);
+    payload = payload || {};
+    var st = payload.st;
+    if (!st || typeof st !== 'object') throw new Error('回傳的進度格式不對');
+    if (st.snap !== r.st.snap || Number(st.startMs) !== Number(r.st.startMs)) throw new Error('這份離線進度和伺服器上的遊戲對不起來');
+    var snap = loadSnapshot_(r.st.snap);
+    if (finaleOn_(snap) || Number(snap.room.skipMin) > 0 || (snap.vault || []).length) throw new Error('這個密室不支援離線回傳');
+    if ((Number(st.v) || 0) < (Number(r.st.v) || 0)) return { stale: true, state: stateOf_(r, '*') };
+    var result = payload.result === 'escaped' || payload.result === 'timeout' ? payload.result : '';
+    if (result === 'escaped' && Number(st.escapeSec) > limitMs_(snap) / 1000 + 5) throw new Error('逃脫時間超過限時，不收');
+    var now = nowMs_();
+    if (Number(st.startMs) > now + 60000) throw new Error('開始時間不合理');
+    r.st = st;
+    r.st.phase = result ? 'done' : 'main';
+    r.result = result;
+    r.ended = result ? (String(payload.ended || '') || nowStr_()) : '';
+    savePlay_(r);
+    (payload.events || []).slice(0, 600).forEach(function (e) {
+      appendRow_('Events', {
+        ts: String(e.ts || nowStr_()), playId: r.id, roomId: r.roomId, puzzleId: String(e.puzzleId || ''),
+        type: String(e.type || '').substring(0, 20), value: e.value === undefined ? '' : String(e.value).substring(0, 60),
+        elapsed: e.elapsed === undefined ? '' : e.elapsed
+      });
+    });
+    return { synced: true, state: stateOf_(r, '*') };
+  });
 }
 
 function playRate(playId, ratings, liked, stuck) {

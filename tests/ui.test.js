@@ -568,11 +568,13 @@ test('玩到一半頁面被手機回收：重開後接回同一場，不會跳�
     await page.evaluate(() => { sessionStorage.setItem('erPlayTab', JSON.parse(localStorage.getItem('erPlay')).id); S.play = null; clearTimers(); boot(); });
     await page.waitForSelector('#barIdx');
 
-    // 重開時剛好沒網路：顯示重試畫面，不清掉進度；網路回來後按重試就接回
+    // 重開時剛好沒網路，而且這台裝置沒有離線題目包（例如剛換裝置、或題目包還沒下載完）：
+    // 顯示重試畫面，不清掉進度；網路回來後按重試就接回。（有題目包時會直接用本機繼續玩，見 offline-ui.test.js）
     await page.context().setOffline(true);
     await page.evaluate(() => {
       window.__realGAS = window.GAS;
       window.GAS = function () { throw new Error('Failed to fetch'); };
+      store('erOff', null); OFF.st = null; OFF.bundle = null; OFF.bundleP = null; OFF.mode = 'online'; OFF.pending = false;
       S.play = null; clearTimers(); boot();
     });
     await page.waitForSelector('#retryBtn');

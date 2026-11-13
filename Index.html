@@ -73,6 +73,28 @@ th{color:var(--muted);font-weight:600}
 .login{max-width:440px;margin:8vh auto;padding:0 16px}
 .login h1{font-size:30px;margin:0 0 6px}
 .login .card{padding:22px}
+.gbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;border:1px solid #dadce0;background:#fff;color:#3c4043;border-radius:10px;padding:12px 16px;font-size:17px;font-weight:600;cursor:pointer}
+.gbtn:hover{background:#f8f9fa}
+.gbtn svg{width:20px;height:20px;flex:none}
+.login .or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;margin:14px 0 10px}
+.login .or:before,.login .or:after{content:"";flex:1;border-top:1px solid var(--line)}
+.me-card{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.me-card .pc{font-family:ui-monospace,Menlo,monospace;font-size:18px;letter-spacing:1px;background:var(--acc2);color:var(--acc);border-radius:8px;padding:2px 10px}
+.chip.lead{background:#fff4d6;color:#8a5a00}
+.chip.mine{background:var(--acc2);color:var(--acc)}
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.board .col{background:#fcfbf8;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.board .col.none{background:#fff8ec;border-style:dashed}
+.board .col h4{margin:0 0 8px;font-size:16px;display:flex;gap:6px;align-items:center}
+.board .st{display:flex;gap:6px;align-items:center;padding:6px 0;border-top:1px solid var(--line);font-size:14px}
+.board .st:first-of-type{border-top:0}
+.board .st .nm{flex:1;min-width:0}
+.board .st .nm small{display:block;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board .st select{width:auto;max-width:110px;padding:4px 6px;font-size:13px}
+.board .st .star{border:0;background:none;cursor:pointer;font-size:18px;line-height:1;padding:2px;color:#c9c3b6}
+.board .st .star.on{color:#e0a100}
+.joinbox{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.joinbox .jc{font-family:ui-monospace,Menlo,monospace;font-size:40px;font-weight:700;letter-spacing:6px;color:var(--acc)}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:8px;align-items:center}
 #toast div{background:#22252a;color:#fff;padding:10px 18px;border-radius:10px;max-width:90vw;box-shadow:0 4px 18px #0003}
 #toast div.err{background:var(--err)}
@@ -898,6 +920,8 @@ function boot() {
       store('erPlay', null);
     }
     if (params.p) return showPlayEntry(String(params.p).toUpperCase());
+    // 掃了老師的加入 QR（?j=加入碼）：記下加入碼，到登入頁讓學生用 Google 登入（不沿用這台 iPad 上一位的登入）
+    if (params.j) { S.joinCode = String(params.j).toUpperCase().slice(0, 4); store('erJoin', S.joinCode); return showLogin(); }
     var c = params.c || store('erCode');
     if (c) return doLogin(c, true);
     showLogin();
@@ -915,17 +939,120 @@ function showResumeChoice(ref, params) {
     '<p class="help">' + (ref.code ? '遊戲代碼 ' + esc(ref.code) + '。' : '') + '要接回去玩，還是到登入／製作密室的頁面？（選登入不會結束那場遊戲）</p>' +
     '<div class="btns"><button class="btn" data-act="resumeYes">繼續遊戲</button><button class="btn ghost" data-act="resumeNo">到登入頁</button></div></div></div>';
 }
+/* ============================================================
+   學生用 Google 帳號登入（沿用數學探索島的 Firebase 專案）
+   只用來確認「你是哪個 Google 帳號」；確認後伺服器給個人代碼，之後跟其他代碼一樣用。
+   Firebase 的程式只在登入頁才載入，玩密室、離線備援都不會用到。
+   ============================================================ */
+var FIREBASE_CFG = {
+  apiKey: 'AIzaSyADSoa44HY5q0mM42Ezuomw5FmnFRA5JRM',
+  authDomain: 'giftedmath-island.firebaseapp.com',
+  projectId: 'giftedmath-island',
+  appId: '1:12080862626:web:67b6a3d714ba46bfc20efb'
+};
+var FB = { mods: null, loading: null };
+var FB_VER = '11.0.2';
+function fbLoad() {
+  if (FB.mods) return Promise.resolve(FB.mods);
+  if (!FB.loading) {
+    var base = 'https://www.gstatic.com/firebasejs/' + FB_VER + '/';
+    FB.loading = Promise.all([import(base + 'firebase-app.js'), import(base + 'firebase-auth.js')]).then(function (m) {
+      var A = m[0], Au = m[1];
+      var fbApp = A.getApps().length ? A.getApp() : A.initializeApp(FIREBASE_CFG);
+      FB.mods = { Au: Au, auth: Au.getAuth(fbApp) };
+      return FB.mods;
+    }).catch(function (e) { FB.loading = null; throw e; });
+  }
+  return FB.loading;
+}
+/** 跳出 Google 選帳號視窗。iPad 的 Safari 只讓「按下去當下」開的視窗通過，所以 Firebase 要在按之前就載好 */
+function googleSignIn() {
+  if (window.ER_FAKE_GOOGLE) return window.ER_FAKE_GOOGLE(); // 自動測試用
+  if (!FB.mods) {
+    return fbLoad().then(function () { throw new Error('Google 登入準備好了，請再按一次'); },
+      function () { throw netErr('載入 Google 登入失敗，請檢查網路後再試'); });
+  }
+  var Au = FB.mods.Au, auth = FB.mods.auth;
+  var prov = new Au.GoogleAuthProvider();
+  prov.setCustomParameters({ prompt: 'select_account' });
+  return Au.signInWithPopup(auth, prov).then(function (res) {
+    var cred = Au.GoogleAuthProvider.credentialFromResult(res);
+    return res.user.getIdToken().then(function (t) {
+      // 拿到憑證就登出 Firebase：共用的 iPad 不會留著上一位學生的登入
+      Au.signOut(auth).catch(function () { });
+      return { idToken: t, googleIdToken: (cred && cred.idToken) || '' };
+    });
+  }, function (e) {
+    var c = (e && e.code) || '';
+    if (/popup-closed|cancelled-popup|user-cancelled/.test(c)) throw new Error('已取消登入');
+    if (/popup-blocked/.test(c)) throw new Error('登入視窗被擋住了，請允許跳出式視窗後再按一次');
+    if (/unauthorized-domain/.test(c)) throw new Error('這個網址不能用 Google 登入，請改用老師給的網址');
+    if (/network/.test(c)) throw netErr('網路不穩，請再試一次');
+    throw new Error('Google 登入失敗：' + ((e && e.message) || c));
+  });
+}
+var G_ICON = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 7l7.4 5.7c4.3-4 6.9-9.9 6.9-17.2z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-2.9-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
+
 function showLogin(msg) {
   clearTimers();
   document.body.className = '';
   S.view = 'login';
+  if (window.ER_API && !window.ER_FAKE_GOOGLE) fbLoad().catch(function () { });
   app.innerHTML = '<div class="login"><h1>密室工坊</h1><p class="muted">上傳謎題、檢核、遊玩，都在這裡。</p>' +
-    '<div class="card"><h3>製作密室</h3><p class="help">輸入老師發的代碼（分組代碼、老師代碼或管理者代碼）。</p>' +
-    '<input type="text" id="code" placeholder="例如 GAB12C" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
-    '<div class="btns"><button class="btn" data-act="login">進入</button></div>' + (msg ? '<p style="color:var(--err)">' + esc(msg) + '</p>' : '') + '</div>' +
+    '<div class="card"><h3>學生：設計謎題</h3><p class="help">用自己的 Google 帳號登入。第一次登入要填姓名和老師公布的加入碼。</p>' +
+    '<button class="gbtn" data-act="googleLogin">' + G_ICON + '用 Google 帳號登入</button>' +
+    '<div class="or">或輸入代碼（老師代碼、個人代碼、分組代碼）</div>' +
+    '<input type="text" id="code" placeholder="例如 SAB12C" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
+    '<div class="btns"><button class="btn ghost" data-act="login">進入</button></div>' + (msg ? '<p style="color:var(--err)">' + esc(msg) + '</p>' : '') + '</div>' +
     '<div class="card"><h3>我是玩家</h3><p class="help">輸入遊戲代碼開始玩。</p>' +
     '<input type="text" id="pcode" placeholder="例如 P7KQ2" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
     '<div class="btns"><button class="btn ghost" data-act="toPlay">開始</button></div></div></div>';
+}
+/** Google 登入後：已加入的學生直接進入；第一次來的填姓名與加入碼 */
+function doGoogleLogin() {
+  googleSignIn().then(function (tok) {
+    S.gTok = tok;
+    return api('studentLogin', tok).then(function (r) {
+      if (r.me) return finishLogin(r.me);
+      showJoin(r);
+    });
+  }).catch(function (e) { toast((e && e.message) || String(e), 'err'); });
+}
+function showJoin(r, msg) {
+  S.view = 'join';
+  S.joinInfo = r;
+  var jc = S.joinCode || store('erJoin') || '';
+  app.innerHTML = '<div class="login"><h1>第一次登入</h1><p class="muted">Google 帳號：' + esc(r.email) + '</p>' +
+    '<div class="card"><h3>加入密室工坊</h3>' +
+    '<label class="f">姓名（會寫在你設計的謎題上）</label><input type="text" id="jName" maxlength="20" value="' + esc(/[\u4e00-\u9fff]/.test(r.name || '') ? r.name : '') + '" placeholder="例如 王小明">' +
+    '<label class="f">學校與班級</label><input type="text" id="jSchool" maxlength="30" placeholder="例如 金城國中 701">' +
+    '<label class="f">加入碼（看老師公布的 4 個字）</label><input type="text" id="jCode" maxlength="4" value="' + esc(jc) + '" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase;font-size:22px;letter-spacing:4px">' +
+    (msg ? '<p style="color:var(--err)">' + esc(msg) + '</p>' : '') +
+    '<div class="btns"><button class="btn" data-act="joinGo">加入</button><button class="btn ghost" data-act="joinBack">換一個帳號</button></div></div>' +
+    '<div class="card"><h3>老師已經給我個人代碼了</h3><p class="help">輸入個人代碼，綁定這個 Google 帳號，之後就能直接用 Google 登入。</p>' +
+    '<input type="text" id="jPersonal" placeholder="例如 SAB12C" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
+    '<div class="btns"><button class="btn ghost" data-act="joinBind">綁定</button></div></div></div>';
+}
+function sendJoin(info) {
+  return api('studentJoin', S.gTok, info).then(function (r) {
+    if (info.joinCode) store('erJoin', info.joinCode);
+    finishLogin(r.me);
+  }).catch(function (e) {
+    if (/驗證失敗/.test(e.message)) return showLogin('登入逾時了，請重新用 Google 登入');
+    showJoin(S.joinInfo, e.message);
+  });
+}
+function finishLogin(me) {
+  S.me = me; S.code = me.code;
+  store('erCode', me.code);
+  goHome();
+}
+/** 依身分回到自己的首頁 */
+function goHome() {
+  if (!S.me) return showLogin();
+  if (S.me.role === 'admin') return showAdmin(S.admin.tab);
+  if (S.me.role === 'teacher') return showTeacherHome();
+  return showGroupHome();
 }
 function doLogin(code, silent) {
   app.innerHTML = '<div class="login"><p class="muted">載入中…</p></div>';
@@ -933,8 +1060,7 @@ function doLogin(code, silent) {
     S.me = me; S.code = me.code;
     store('erCode', me.code);
     if (me.role === 'admin') return showAdmin('overview');
-    if (me.role === 'teacher') return showTeacherHome();
-    return showGroupHome();
+    goHome();
   }).catch(function (e) {
     if (e && e.net) { // 斷線不等於登入失效：保留代碼，網路回來再試
       if (silent) return showOffline(function () { doLogin(code, true); }, '目前連不上伺服器，你的登入有保留，網路恢復後按「重試」。');
@@ -953,7 +1079,7 @@ function showGroupHome(fromCache) {
   clearTimers();
   document.body.className = '';
   S.view = 'ws';
-  var cached = fromCache === true && S.ws && S.ws.mode === 'group' && S.ws.room;
+  var cached = fromCache === true && S.ws && S.ws.mode === 'group' && (S.ws.room || S.ws.student);
   if (cached) renderWorkspace();
   else app.innerHTML = topbar('密室工坊') + '<div class="wrap"><p class="muted">載入中…</p></div>';
   return (cached ? apiRaw : api)('getWorkspace', S.code).then(function (ws) {
@@ -972,8 +1098,59 @@ function adminOpenWorkspace(roomId) {
     renderWorkspace();
   }).catch(fail);
 }
-function wsMembers() { return S.ws.mode === 'admin' ? (S.ws.members || []) : (S.me.members || []); }
+function wsMembers() { return S.ws.mode === 'admin' || S.ws.student ? (S.ws.members || []) : (S.me.members || []); }
+/** 學生的首頁：還沒分組 → 只有自己的題目；分組後 → 整組的題目（自己的可以改），組長多了密室資訊、排序、送審 */
+function renderStudentHome() {
+  var ws = S.ws, room = ws.room, me = ws.me || {};
+  if (S.me) { S.me.members = ws.members || []; S.me.name = me.name || S.me.name; }
+  var h = topbar(room ? (room.groupName || '我的組') : '我的謎題') + '<div class="wrap">';
+  h += '<div class="card me-card"><div style="flex:1;min-width:200px"><b style="font-size:18px">' + esc(me.name) + '</b>' + (me.school ? ' <span class="muted">' + esc(me.school) + '</span>' : '') +
+    (room ? ' ' + (ws.isLeader ? '<span class="chip lead">★ 組長</span>' : '<span class="chip">組員</span>') : '') +
+    '<div class="help" style="margin:4px 0 0">個人代碼 <span class="pc">' + esc(me.code) + '</span> 不能用 Google 登入時，在登入頁輸入這個代碼。</div></div></div>';
+  if (!room) {
+    h += '<div class="banner">還沒分組。先做自己的題目；老師分組後，你的題目會自動帶進你那一組。</div>';
+    h += '<div class="card"><h3>我的題目</h3>';
+    if (!ws.puzzles.length) h += '<p class="help">還沒有題目。按「新增一題」開始設計（每人至少 ' + esc(S.me.settings.minPuzzlesPerMember) + ' 題）。</p>';
+    h += '<div class="list">' + ws.puzzles.map(function (p) {
+      return '<div class="item click" data-act="openPuzzle" data-id="' + esc(p.id) + '"><div class="main"><div class="t">' + esc(p.title || '（未命名）') + '</div><div class="m">' +
+        kindLabel(p.kind) + ' · ' + (p.estMinutes ? p.estMinutes + ' 分鐘' : '未填時間') + '</div></div>' + sumDots(summarize(p.checks)) + '</div>';
+    }).join('') + '</div><div class="btns"><button class="btn" data-act="newPuzzle">＋ 新增一題</button><button class="btn ghost" data-act="refreshWs">重新整理</button></div></div>';
+    app.innerHTML = h + '</div>';
+    return;
+  }
+  var locked = !ws.editable, lead = ws.isLeader;
+  var rs = summarize(ws.roomChecks);
+  var counts = {};
+  (ws.members || []).forEach(function (m) { counts[m] = 0; });
+  ws.puzzles.forEach(function (p) { if (counts[p.author] !== undefined) counts[p.author]++; });
+  if (locked) h += '<div class="banner">' + (room.status === 'approved' ? '老師已審核通過。' : '已送審，正在等老師審核。') + '內容已鎖定，要修改請找老師開放。</div>';
+  h += '<div class="card"><div class="row" style="align-items:center"><div><h3 style="margin:0">' + esc(room.title || '（未命名密室）') + '</h3><div class="muted">' + statusChip(room.status) +
+    (room.published ? ' <span class="chip pub">已發布 ' + esc(room.playCode) + '</span>' : '') + ' · ' + ws.puzzles.length + ' 題 · 預估 ' +
+    ws.puzzles.reduce(function (t, p) { return t + (Number(p.estMinutes) || 0); }, 0) + ' 分鐘</div></div>' +
+    '<div style="flex:none"><button class="btn ghost" data-act="editRoom">' + (lead && !locked ? '密室資訊（封面、故事頁、結局、心智圖）' : '看密室資訊') + '</button></div></div>';
+  h += '<p class="help" style="margin:10px 0 0">組員：' + (ws.members || []).map(function (m) { return esc(m) + (m === ws.leaderName ? '★' : '') + '（' + counts[m] + ' 題）'; }).join('、') + '</p>';
+  h += '<p class="help" style="margin:4px 0 0">' + (lead ? '你是組長：負責密室資訊（封面、故事頁、結局的圖）、題目順序和送審。' : '組長' + (ws.leaderName ? '「' + esc(ws.leaderName) + '」' : '') + '負責密室資訊、題目順序和送審；你負責把自己的題目做好。') + '</p></div>';
+
+  h += '<div class="card"><h3>謎題</h3>';
+  if (!ws.puzzles.length) h += '<p class="help">還沒有題目。每位組員按「新增一題」開始做自己的題目。</p>';
+  h += '<div class="list">' + ws.puzzles.map(function (p, i) {
+    return '<div class="item click" data-act="openPuzzle" data-id="' + esc(p.id) + '"><div class="big" style="font-size:22px;width:34px;color:var(--acc)">' + (i + 1) + '</div><div class="main"><div class="t">' +
+      esc(p.title || '（未命名）') + (p.mine ? ' <span class="chip mine">我的</span>' : '') + '</div><div class="m">' + esc(p.author || '') + ' · ' + kindLabel(p.kind) + ' · ' + (p.estMinutes ? p.estMinutes + ' 分鐘' : '未填時間') + (p.mine ? '' : ' · 唯讀') + '</div></div>' +
+      sumDots(summarize(p.checks)) +
+      (!locked && lead ? '<span class="noprint" style="display:flex;gap:4px"><button class="iconbtn" data-act="movePuzzle" data-id="' + esc(p.id) + '" data-dir="-1" aria-label="上移">↑</button><button class="iconbtn" data-act="movePuzzle" data-id="' + esc(p.id) + '" data-dir="1" aria-label="下移">↓</button></span>' : '') + '</div>';
+  }).join('') + '</div>';
+  h += '<div class="btns">' + (!locked ? '<button class="btn" data-act="newPuzzle">＋ 新增一題</button>' : '') + '<button class="btn ghost" data-act="refreshWs">重新整理</button></div></div>';
+
+  h += '<div class="card"><h3>檢核表 ' + sumDots(rs) + '</h3>' + checksHtml(ws.roomChecks) + '</div>';
+  h += '<div class="btns noprint"><button class="btn ghost" data-act="testPlay">▶ 試玩整間</button>';
+  if (room.status === 'draft') {
+    if (lead) h += '<button class="btn" data-act="submitRoom"' + (rs.err ? ' disabled' : '') + '>送審</button>' + (rs.err ? '<span class="muted" style="align-self:center">紅燈都處理完才能送審</span>' : '');
+    else h += '<span class="muted" style="align-self:center">全組完成後，由組長按「送審」。</span>';
+  }
+  app.innerHTML = h + '</div></div>';
+}
 function renderWorkspace() {
+  if (S.ws.student) return renderStudentHome();
   var ws = S.ws, room = ws.room, admin = ws.mode === 'admin';
   var members = wsMembers();
   var counts = {};
@@ -1047,7 +1224,7 @@ function openPuzzle(id) {
   var p = (S.ws.puzzles || []).filter(function (x) { return x.id === id; })[0];
   var editable;
   if (S.ws.mode === 'admin') editable = true;
-  else if (S.ws.mode === 'teacher') editable = !!p.editable;
+  else if (S.ws.mode === 'teacher' || S.ws.student) editable = !!p.editable;
   else editable = S.ws.editable;
   S.puzzle = clone(p);
   S.edit = { editable: editable, mode: S.ws.mode };
@@ -1087,16 +1264,17 @@ function renderPuzzleEditor() {
   var p = S.puzzle, ro = !S.edit.editable, dis = ro ? ' disabled' : '';
   var st = S.me.settings;
   var isTeacherPuzzle = p.roomId === 'BANK';
+  var fixedAuthor = isTeacherPuzzle || p.ownerKind === 'student'; // 老師、學生的題目：設計者就是本人，不能選
   var members = S.edit.mode === 'admin' ? (S.ws.members || []) : (S.me.members || []);
   S.view = 'puzzle';
   var no = (S.ws.puzzles || []).map(function (x) { return x.id; }).indexOf(p.id) + 1;
-  var h = topbar((no && !isTeacherPuzzle ? '第 ' + no + ' 題' : '謎題卡') + (ro ? '（唯讀）' : ''), { back: 'backPuzzle', status: !ro }) + '<div class="wrap">';
+  var h = topbar((no && !isTeacherPuzzle && (!S.ws.student || S.ws.room) ? '第 ' + no + ' 題' : '謎題卡') + (ro ? '（唯讀）' : ''), { back: 'backPuzzle', status: !ro }) + '<div class="wrap">';
   h += '<div class="card"><h3>檢核</h3><div id="pchecks">' + checksHtml(p.checks) + '</div></div>';
 
   // 1 基本
   h += '<div class="card"><h3><span class="no">1</span>基本資料</h3><label class="f">題目名稱</label><input type="text" data-f="title" value="' + esc(p.title) + '"' + dis + '>';
-  h += '<div class="row"><div><label class="f">負責' + (isTeacherPuzzle ? '老師' : '成員') + '</label>';
-  if (isTeacherPuzzle) h += '<input type="text" value="' + esc(p.author) + '" disabled>';
+  h += '<div class="row"><div><label class="f">' + (isTeacherPuzzle ? '負責老師' : fixedAuthor ? '設計者' : '負責成員') + '</label>';
+  if (fixedAuthor) h += '<input type="text" value="' + esc(p.author) + '" disabled>';
   else h += '<select data-f="author"' + dis + '><option value="">請選擇</option>' + members.map(function (m) { return '<option' + (m === p.author ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select>';
   h += '</div><div><label class="f">類型</label><div class="seg">' + ['digital', 'physical'].map(function (k) {
     return '<button type="button" data-act="setKind" data-k="' + k + '" class="' + (p.kind === k ? 'on' : '') + '"' + dis + '>' + kindLabel(k) + '</button>';
@@ -1234,7 +1412,7 @@ function openRoomEditor() {
   };
   // 分組的工作區資料裡已經有完整的密室內容，直接打開，不必再等一次伺服器
   if (ws.mode === 'group' && ws.room && ws.room.cover) {
-    var r = clone(ws.room); r.editable = ws.editable; go(r);
+    var r = clone(ws.room); r.editable = ws.editable && (!ws.student || ws.isLeader); go(r);
     // 背景再確認一次：如果同組有人剛改過、或老師剛鎖定，而這邊還沒開始打字，就換成最新版
     return apiRaw('getRoom', S.code, ws.room.id).then(function (fresh) {
       if (S.view !== 'room' || !S.room || S.room.id !== fresh.id) return;
@@ -1356,7 +1534,7 @@ function showAdmin(tab) {
     renderAdmin();
   }).catch(fail);
 }
-var ADMIN_TABS = { overview: '總覽與審核', bank: '示範密室與題庫', codes: '代碼', live: '進行中', settings: '設定' };
+var ADMIN_TABS = { overview: '總覽與審核', students: '學生與分組', bank: '示範密室與題庫', codes: '代碼', live: '進行中', settings: '設定' };
 function renderAdmin() {
   clearTimers();
   var d = S.admin.data, tab = S.admin.tab;
@@ -1368,6 +1546,7 @@ function renderAdmin() {
   if (tab === 'overview') body.innerHTML = adminOverviewHtml(d);
   if (tab === 'bank') body.innerHTML = adminBankHtml(d);
   if (tab === 'codes') body.innerHTML = adminCodesHtml(d);
+  if (tab === 'students') { body.innerHTML = adminStudentsHtml(d); drawQrs(); }
   if (tab === 'settings') body.innerHTML = adminSettingsHtml(d.settings);
   if (tab === 'live') { body.innerHTML = '<p class="muted">載入中…</p>'; loadLive(); S.timers.push(setInterval(loadLive, 10000)); }
 }
@@ -1376,6 +1555,10 @@ function roomCardHtml(r) {
     '<div class="muted" style="font-size:14px">' + (r.kind === 'group' ? esc(r.title) : '老師示範密室') + '</div></div>' + statusChip(r.status) + '</div>';
   h += '<p style="margin:8px 0;font-size:14px">' + sumDots(r.summary) + ' · ' + r.puzzleCount + ' 題 · 預估 ' + r.estTotal + ' / ' + (r.timeLimitMin || '') + ' 分鐘' +
     (r.unlocksUsed ? ' · 已開放修改 ' + r.unlocksUsed + ' 次' : '') + (r.location ? ' · ' + esc(r.location) : '') + '</p>';
+  if (r.kind === 'group' && (r.members || []).length) {
+    var ld = (S.admin.data.students || []).filter(function (x) { return x.code === r.leaderCode; })[0];
+    h += '<p class="muted" style="margin:0 0 8px;font-size:13px">組員：' + r.members.map(esc).join('、') + (ld ? ' · 組長 ' + esc(ld.name) : '') + '</p>';
+  }
   if (r.published) h += '<p style="margin:0 0 8px"><span class="chip pub">已發布｜遊戲代碼 ' + esc(r.playCode) + '</span></p>';
   h += '<div class="btns">';
   h += '<button class="btn sm" data-act="adminView" data-id="' + r.id + '">檢視</button>';
@@ -1396,7 +1579,7 @@ function adminOverviewHtml(d) {
   var n = function (st) { return groups.filter(function (r) { return r.status === st; }).length; };
   var h = '<div class="card"><div class="row" style="align-items:center"><div><b>' + esc(d.settings.campName) + '</b><div class="muted" style="font-size:14px">' + groups.length + ' 組：製作中 ' + n('draft') + '、已送審 ' + n('submitted') + '、審核通過 ' + n('approved') + '</div></div>' +
     '<div style="flex:none" class="btns"><button class="btn ghost sm" data-act="materials">列印材料清單</button><button class="btn ghost sm" data-act="refreshAdmin">重新整理</button></div></div></div>';
-  if (!groups.length) h += '<div class="banner">還沒有分組。到「代碼」分頁建立各組代碼。</div>';
+  if (!groups.length) h += '<div class="banner">還沒有分組。到「學生與分組」分頁開放學生加入、建立組別。</div>';
   h += '<div class="grid">' + groups.map(roomCardHtml).join('') + '</div>';
   if (trooms.length) h += '<h3 style="margin:18px 0 10px">示範密室</h3><div class="grid">' + trooms.map(roomCardHtml).join('') + '</div>';
   return h;
@@ -1427,6 +1610,66 @@ function playExtrasText(r) {
   if (Number(r.skipMin) > 0) x.push('跳過扣 ' + r.skipMin + ' 分');
   if ((r.vaultIds || []).length) x.push('寶庫 ' + r.vaultIds.length + ' 題');
   return x.length ? ' · ' + x.join('、') : '';
+}
+/* ---------- 學生與分組 ---------- */
+function adminStudentsHtml(d) {
+  var url = frontUrl(d);
+  var groups = d.rooms.filter(function (r) { return r.kind === 'group'; });
+  var studs = d.students || [];
+  var h = '<div class="card"><h3>讓學生加入</h3>';
+  if (d.joinCode) {
+    var ju = url ? url + '?j=' + d.joinCode : '';
+    h += '<div class="joinbox"><div class="qr" data-qr="' + esc(ju) + '"></div><div style="flex:1;min-width:240px"><div class="help" style="margin:0">加入碼</div><div class="jc">' + esc(d.joinCode) + '</div>' +
+      '<p class="help">學生掃 QR（或打開 ' + esc(url || '網址') + '）→ 用 Google 帳號登入 → 填姓名、學校班級和加入碼。<br>大家都加入後可以「關閉加入」，已加入的學生照常登入。</p>' +
+      '<div class="btns"><button class="btn sm" data-act="joinQr">放大 QR（投影用）</button><button class="btn ghost sm" data-act="joinCode" data-a="new">換一個加入碼</button><button class="btn ghost sm" data-act="joinCode" data-a="close">關閉加入</button></div></div></div>';
+  } else {
+    h += '<p class="help">目前沒有開放加入。按「開放加入」會產生 4 個字的加入碼和 QR code，投影給學生掃就好，不用印代碼。</p><div class="btns"><button class="btn" data-act="joinCode" data-a="new">開放加入</button></div>';
+  }
+  h += '</div>';
+
+  h += '<div class="card"><h3>分組（' + groups.length + ' 組・' + studs.length + ' 位學生）</h3>' +
+    '<p class="help">用每個人旁邊的選單換組，<b>題目會跟著人走</b>。按 ☆ 指定組長（組長負責密室資訊、題目順序、送審）；第一個分進一組的人會自動當組長。</p>' +
+    '<label style="display:flex;gap:8px;align-items:center;margin:0 0 12px;font-size:14px"><input type="checkbox" id="keepPz"> 這次換組時，題目留在原組（不勾 = 題目跟著人走）</label>';
+  var opts = function (cur) {
+    return '<option value=""' + (cur ? '' : ' selected') + '>未分組</option>' + groups.map(function (g) {
+      return '<option value="' + esc(g.id) + '"' + (g.id === cur ? ' selected' : '') + '>' + esc(g.groupName || g.title) + '</option>';
+    }).join('');
+  };
+  var stRow = function (st, room) {
+    var lead = room && room.leaderCode === st.code;
+    return '<div class="st">' + (room ? '<button class="star' + (lead ? ' on' : '') + '" data-act="setLeader" data-room="' + esc(room.id) + '" data-code="' + esc(lead ? '' : st.code) + '" title="' + (lead ? '取消組長' : '設為組長') + '" aria-label="' + (lead ? '取消組長' : '設為組長') + '">' + (lead ? '★' : '☆') + '</button>' : '') +
+      '<div class="nm">' + esc(st.name) + '<small>' + esc(st.school || '') + (st.school ? ' · ' : '') + st.puzzles + ' 題' + (st.email ? '' : ' · 個人代碼 ' + esc(st.code)) + '</small></div>' +
+      '<select data-assign="' + esc(st.code) + '" aria-label="' + esc(st.name) + ' 的組別">' + opts(st.roomId) + '</select></div>';
+  };
+  h += '<div class="board">';
+  var known = {};
+  groups.forEach(function (g) {
+    known[g.id] = 1;
+    var mem = studs.filter(function (x) { return x.roomId === g.id; });
+    h += '<div class="col"><h4>' + esc(g.groupName || g.title) + ' <span class="muted" style="font-weight:400;font-size:13px">' + mem.length + ' 人・' + g.puzzleCount + ' 題</span><span class="sp" style="flex:1"></span>' + statusChip(g.status) + '</h4>' +
+      (mem.length ? mem.map(function (x) { return stRow(x, g); }).join('') : '<p class="muted" style="font-size:13px;margin:4px 0">還沒有人</p>') + '</div>';
+  });
+  var none = studs.filter(function (x) { return !x.roomId || !known[x.roomId]; });
+  h += '<div class="col none"><h4>未分組 <span class="muted" style="font-weight:400;font-size:13px">' + none.length + ' 人</span></h4>' +
+    (none.length ? none.map(function (x) { return stRow(x, null); }).join('') : '<p class="muted" style="font-size:13px;margin:4px 0">都分好了</p>') + '</div>';
+  h += '</div>';
+  h += '<div class="row" style="margin-top:14px"><div><label class="f">新增組別（一行一組，或用逗號分開）</label><input type="text" id="newGroupNames" placeholder="例如：第一組, 第二組, 第三組"></div><div style="flex:none;align-self:flex-end"><button class="btn" data-act="createGroupNames">建立</button></div></div>' +
+    '<p class="help">要刪掉空的組，到「代碼」分頁。</p></div>';
+
+  h += '<div class="card"><h3>學生名單（' + studs.length + '）</h3>';
+  if (studs.length) {
+    h += '<div style="overflow-x:auto"><table><tr><th>姓名</th><th>學校班級</th><th>Google 帳號</th><th>個人代碼</th><th>題數</th><th></th></tr>' + studs.map(function (st) {
+      return '<tr><td><input type="text" data-stname="' + esc(st.code) + '" value="' + esc(st.name) + '" style="min-width:90px"></td><td><input type="text" data-stschool="' + esc(st.code) + '" value="' + esc(st.school) + '" style="min-width:110px"></td>' +
+        '<td style="font-size:13px;word-break:break-all">' + (st.email ? esc(st.email) : '<span class="muted">未綁定</span>') + '</td><td class="big" style="font-size:16px">' + esc(st.code) + '</td><td>' + st.puzzles + '</td>' +
+        '<td style="white-space:nowrap"><button class="btn ghost sm" data-act="saveStudent" data-code="' + esc(st.code) + '">儲存</button> ' +
+        (st.email ? '<button class="btn ghost sm" data-act="unbindStudent" data-code="' + esc(st.code) + '">解除綁定</button> ' : '') +
+        '<button class="btn danger sm" data-act="deleteStudent" data-code="' + esc(st.code) + '"' + (st.puzzles ? ' disabled title="有題目的學生不能刪除"' : '') + '>刪除</button></td></tr>';
+    }).join('') + '</table></div>';
+  } else h += '<p class="muted">還沒有學生加入。</p>';
+  h += '<p class="help">改姓名時，他設計的題目署名會一起改。「解除綁定」用在學生換 Google 帳號：他下次用新帳號登入時輸入個人代碼就能接回原本的題目。</p>';
+  h += '<label class="f">沒辦法用 Google 登入的學生：老師直接建個人代碼（一行一位，格式：姓名：學校班級）</label><textarea id="newStudents" placeholder="王小明：金城國中 701&#10;陳小華：金湖國中 702"></textarea>' +
+    '<div class="btns"><button class="btn" data-act="createStudents">建立個人代碼</button><button class="btn ghost" data-act="printStudentCodes"' + (studs.length ? '' : ' disabled') + '>列印個人代碼 QR</button></div></div>';
+  return h;
 }
 function adminCodesHtml(d) {
   var url = frontUrl(d);
@@ -1582,11 +1825,12 @@ function renderAssemble() {
   }).join('') + '</div><div class="btns"><button class="btn" data-act="asmSave">儲存</button></div></div></div></div>';
   app.innerHTML = h;
 }
-function printCodes() {
+function printCodes(students) {
   var d = S.admin.data, url = frontUrl(d);
-  var list = d.codes.filter(function (c) { return c.role !== 'admin'; });
-  var h = topbar('列印代碼', { back: 'toAdminCodes' }) + '<div class="wrap"><div class="btns noprint" style="margin-bottom:12px"><button class="btn" data-act="print">列印</button></div><div class="qrsheet">' + list.map(function (c) {
-    return '<div class="cell"><div style="font-weight:700;font-size:18px">' + esc(c.name) + '</div><div class="muted" style="font-size:13px">' + (c.role === 'teacher' ? '老師代碼' : '分組代碼') + '</div><div class="qr" data-qr="' + esc(url ? url + '?c=' + c.code : '') + '"></div><div class="big">' + esc(c.code) + '</div>' +
+  var list = students ? (d.students || []).map(function (c) { return { code: c.code, name: c.name, role: 'student', members: c.school ? c.school : '' }; })
+    : d.codes.filter(function (c) { return c.role !== 'admin'; });
+  var h = topbar('列印代碼', { back: students ? 'toAdminStudents' : 'toAdminCodes' }) + '<div class="wrap"><div class="btns noprint" style="margin-bottom:12px"><button class="btn" data-act="print">列印</button></div><div class="qrsheet">' + list.map(function (c) {
+    return '<div class="cell"><div style="font-weight:700;font-size:18px">' + esc(c.name) + '</div><div class="muted" style="font-size:13px">' + (c.role === 'teacher' ? '老師代碼' : c.role === 'student' ? '個人代碼' : '分組代碼') + '</div><div class="qr" data-qr="' + esc(url ? url + '?c=' + c.code : '') + '"></div><div class="big">' + esc(c.code) + '</div>' +
       (c.members ? '<div style="font-size:13px">' + esc(String(c.members).split(',').join('、')) + '</div>' : '') + '</div>';
   }).join('') + '</div></div>';
   app.innerHTML = h;
@@ -2108,6 +2352,18 @@ app.addEventListener('input', function (e) {
 });
 app.addEventListener('change', function (e) {
   var t = e.target;
+  // 管理者換組：選了就存，題目預設跟著人走
+  if (t.getAttribute('data-assign')) {
+    var sc = t.getAttribute('data-assign'), keep = document.getElementById('keepPz');
+    t.disabled = true;
+    netBusy(true);
+    apiRaw('adminAssignStudent', S.code, sc, t.value, { keepPuzzles: !!(keep && keep.checked) }).then(function (r) {
+      netBusy(false);
+      toast(r.moved ? '已換組，' + r.moved + ' 題一起移過去' : '已換組');
+      showAdmin('students');
+    }).catch(function (err) { netBusy(false); fail(err); showAdmin('students'); });
+    return;
+  }
   if (t.getAttribute('data-check') && S.saver) {
     setPath(S.target === 'room' ? S.room : S.puzzle, t.getAttribute('data-check'), t.checked);
     S.saver.touch();
@@ -2178,8 +2434,22 @@ var ACTIONS = {
   toPlay: function () { var c = document.getElementById('pcode').value.trim().toUpperCase(); if (!c) return toast('請輸入遊戲代碼', 'err'); showPlayEntry(c); },
   resumeYes: function () { resumePlay(S.resumeRef); },
   resumeNo: function () { var c = S.resumeParams.c || store('erCode'); c ? doLogin(c, true) : showLogin(); },
-  toLogin: function () { if (OFF.pending && !OFF.err) return toast('成績還沒回傳，請先連上網路，等畫面上方出現「已回傳」再離開', 'err'); S.play = null; store('erPlay', null); S.me ? (S.me.role === 'admin' ? showAdmin() : S.me.role === 'teacher' ? showTeacherHome() : showGroupHome()) : showLogin(); },
-  logout: function () { leaveEditor().then(function () { store('erCode', null); S.me = null; S.code = null; showLogin(); }); },
+  toLogin: function () { if (OFF.pending && !OFF.err) return toast('成績還沒回傳，請先連上網路，等畫面上方出現「已回傳」再離開', 'err'); S.play = null; store('erPlay', null); S.me ? (S.me.role === 'admin' ? showAdmin() : goHome()) : showLogin(); },
+  googleLogin: function () { doGoogleLogin(); },
+  joinGo: function () {
+    var info = { name: document.getElementById('jName').value.trim(), school: document.getElementById('jSchool').value.trim(), joinCode: document.getElementById('jCode').value.trim().toUpperCase() };
+    if (!info.name) return toast('請填姓名', 'err');
+    if (!info.joinCode) return toast('請填加入碼', 'err');
+    sendJoin(info);
+  },
+  joinBind: function () {
+    var pc = document.getElementById('jPersonal').value.trim().toUpperCase();
+    if (!pc) return toast('請輸入個人代碼', 'err');
+    sendJoin({ personalCode: pc });
+  },
+  joinBack: function () { S.gTok = null; showLogin(); },
+  refreshWs: function () { showGroupHome(); },
+  logout: function () { leaveEditor().then(function () { store('erCode', null); S.me = null; S.code = null; S.ws = null; showLogin(); }); },
   editRoom: function () { openRoomEditor(); },
   backRoom: function () { backFromRoom(); },
   backPuzzle: function () { backFromPuzzle(); },
@@ -2187,7 +2457,7 @@ var ACTIONS = {
     var mine = S.ws.mode === 'teacher' && (S.ws.puzzles || []).some(function (x) { return x.id === id && x.editable; });
     // 老師自己的題目清單裡就有完整內容，直接開；別人的題目才向伺服器拿最新版
     if (S.ws.mode === 'teacher' && !mine) return api('getPuzzle', S.code, id).then(function (p) { var i = S.ws.puzzles.map(function (x) { return x.id; }).indexOf(id); S.ws.puzzles[i] = p; openPuzzle(id); }).catch(fail); openPuzzle(id); },
-  newPuzzle: function () { api('newPuzzle', S.code).then(function (p) { p.editable = true; S.ws.puzzles.push(p); openPuzzle(p.id); }).catch(fail); },
+  newPuzzle: function () { api('newPuzzle', S.code).then(function (p) { p.editable = true; p.mine = true; S.ws.puzzles.push(p); openPuzzle(p.id); }).catch(fail); },
   movePuzzle: function (el, id) {
     var dir = Number(el.getAttribute('data-dir')), ps = S.ws.puzzles;
     var i = ps.map(function (x) { return x.id; }).indexOf(id), j = i + (dir < 0 ? -1 : 1);
@@ -2200,7 +2470,7 @@ var ACTIONS = {
     confirmBox('確定要刪除「' + (S.puzzle.title || '這一題') + '」嗎？刪除後無法復原。', '刪除').then(function (ok) {
       if (!ok) return;
       S.saver = null;
-      api('deletePuzzle', S.code, S.puzzle.id).then(function () { toast('已刪除'); S.ws.mode === 'teacher' ? showTeacherHome() : showGroupHome(); }).catch(fail);
+      api('deletePuzzle', S.code, S.puzzle.id).then(function () { toast('已刪除'); goHome(); }).catch(fail);
     });
   },
   setKind: function (el) { S.puzzle.kind = el.getAttribute('data-k'); S.saver.touch(); app.querySelectorAll('[data-act=setKind]').forEach(function (b) { b.className = b === el ? 'on' : ''; }); },
@@ -2422,6 +2692,56 @@ var ACTIONS = {
     api('adminCreateTeachers', S.code, names).then(function (r) { toast('已建立 ' + r.length + ' 位'); showAdmin('codes'); }).catch(fail);
   },
   printCodes: function () { printCodes(); },
+  printStudentCodes: function () { printCodes(true); },
+  toAdminStudents: function () { showAdmin('students'); },
+  joinCode: function (el) {
+    var a = el.getAttribute('data-a');
+    var go = function () { api('adminJoinCode', S.code, a).then(function (jc) { S.admin.data.joinCode = jc; renderAdmin(); toast(jc ? '加入碼：' + jc : '已關閉加入'); }).catch(fail); };
+    if (a === 'new' && S.admin.data.joinCode) return confirmBox('換一個加入碼後，舊的加入碼就不能用了（已經加入的學生不受影響）。確定嗎？', '換新的').then(function (ok) { if (ok) go(); });
+    go();
+  },
+  joinQr: function () {
+    var d = S.admin.data, url = frontUrl(d), ju = url ? url + '?j=' + d.joinCode : '';
+    modal('<h3>' + esc(d.settings.campName) + '｜學生加入</h3><div style="text-align:center"><div class="qr" id="bigQr" style="display:inline-block;margin:10px 0"></div><div class="jc" style="font-family:ui-monospace,Menlo,monospace;font-size:56px;font-weight:700;letter-spacing:10px;color:var(--acc)">' + esc(d.joinCode) + '</div>' +
+      '<p>掃 QR → 用 Google 帳號登入 → 填姓名和加入碼</p><p class="muted" style="word-break:break-all">' + esc(url) + '</p></div>');
+    var q = document.getElementById('bigQr');
+    if (ju) { try { new QRCode(q, { text: ju, width: 320, height: 320 }); } catch (e) { q.textContent = ju; } }
+  },
+  setLeader: function (el) {
+    api('adminSetLeader', S.code, el.getAttribute('data-room'), el.getAttribute('data-code') || '').then(function () { showAdmin('students'); }).catch(fail);
+  },
+  createGroupNames: function () {
+    var names = document.getElementById('newGroupNames').value.split(/[\n,，、]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    if (!names.length) return toast('請先輸入組名', 'err');
+    var have = S.admin.data.rooms.filter(function (r) { return r.kind === 'group'; }).map(function (r) { return r.groupName; });
+    var dup = names.filter(function (n) { return have.indexOf(n) >= 0; });
+    if (dup.length) return toast('已經有「' + dup.join('、') + '」了', 'err');
+    api('adminCreateGroups', S.code, names.map(function (n) { return { name: n }; })).then(function (r) { toast('已建立 ' + r.length + ' 組'); showAdmin('students'); }).catch(fail);
+  },
+  saveStudent: function (el) {
+    var c = el.getAttribute('data-code');
+    api('adminUpdateStudent', S.code, c, { name: document.querySelector('[data-stname="' + c + '"]').value, school: document.querySelector('[data-stschool="' + c + '"]').value })
+      .then(function () { toast('已儲存'); showAdmin('students'); }).catch(fail);
+  },
+  unbindStudent: function (el) {
+    var c = el.getAttribute('data-code'), st = S.admin.data.students.filter(function (x) { return x.code === c; })[0];
+    confirmBox('解除「' + st.name + '」和 ' + st.email + ' 的綁定？\n之後他要用新的 Google 帳號登入，並在第一次登入時輸入個人代碼 ' + c + '。', '解除綁定').then(function (ok) {
+      if (ok) api('adminUpdateStudent', S.code, c, { clearEmail: true }).then(function () { toast('已解除綁定'); showAdmin('students'); }).catch(fail);
+    });
+  },
+  deleteStudent: function (el) {
+    var c = el.getAttribute('data-code'), st = S.admin.data.students.filter(function (x) { return x.code === c; })[0];
+    confirmBox('確定要刪除「' + st.name + '」嗎？（' + (st.email || c) + '）', '刪除').then(function (ok) {
+      if (ok) api('adminDeleteStudent', S.code, c).then(function () { toast('已刪除'); showAdmin('students'); }).catch(fail);
+    });
+  },
+  createStudents: function () {
+    var list = document.getElementById('newStudents').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (l) {
+      var m = l.split(/[:：]/); return { name: m[0].trim(), school: (m[1] || '').trim() };
+    });
+    if (!list.length) return toast('請先輸入姓名', 'err');
+    api('adminCreateStudents', S.code, list).then(function (r) { toast('已建立 ' + r.length + ' 位：' + r.map(function (x) { return x.name + ' ' + x.code; }).join('、')); showAdmin('students'); }).catch(fail);
+  },
   saveSettings: function () {
     var data = {};
     document.querySelectorAll('[data-set]').forEach(function (i) { data[i.getAttribute('data-set')] = i.type === 'checkbox' ? i.checked : i.value; });

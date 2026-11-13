@@ -10,7 +10,8 @@ var APP_NAME = '密室工坊';
 var BANK = 'BANK'; // 老師題庫的 roomId
 
 var SHEETS = {
-  Codes:     ['code', 'role', 'name', 'members', 'roomId', 'created'],
+  // 學生（role = student）：一人一列，email 是 Google 登入的帳號，roomId 是目前被分到的組（空白 = 還沒分組）
+  Codes:     ['code', 'role', 'name', 'members', 'roomId', 'created', 'email', 'school'],
   Rooms:     ['id', 'ownerCode', 'kind', 'title', 'status', 'published', 'playCode', 'updated', 'json'],
   Puzzles:   ['id', 'roomId', 'ownerCode', 'author', 'title', 'kind', 'deleted', 'updated', 'json'],
   Snapshots: ['roomId', 'version', 'ts', 'fileId'],
@@ -36,6 +37,12 @@ var DEFAULT_SETTINGS = {
 };
 
 var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/* 學生用 Google 帳號登入：沿用「數學探索島」的 Firebase 專案（giftedmath-island）。
+ * 這組 apiKey 本來就公開在網頁裡，不是密碼；這裡只拿來向 Google 確認登入憑證是真的、是哪個 email。 */
+var FIREBASE_API_KEY = 'AIzaSyADSoa44HY5q0mM42Ezuomw5FmnFRA5JRM';
+var FIREBASE_PROJECT_NUMBER = '12080862626';
+var FRONT_ORIGIN = 'https://huangisright.github.io/';
 var MAX_JSON = 48000;
 
 /* ============================================================
@@ -53,10 +60,11 @@ function doGet(e) {
  * 這樣畫面不必在 script.google.com 上打開，同時登入多個 Google 帳號也不會出錯。
  * 只開放畫面會用到的函式；setup、showAdminCode 等管理用函式不在名單內。
  */
-var API_FUNCTIONS = ['login', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
+var API_FUNCTIONS = ['login', 'studentLogin', 'studentJoin', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
   'playStart', 'startTestPlay', 'playBegin', 'playState', 'playOpen', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playHintImage', 'playRate', 'playBundle', 'playSync',
   'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
+  'adminJoinCode', 'adminCreateStudents', 'adminUpdateStudent', 'adminDeleteStudent', 'adminAssignStudent', 'adminSetLeader',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminSetRoomPlaces', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
 
@@ -338,15 +346,20 @@ function needRole_(acct, roles) {
 function canReadPuzzle_(acct, p) {
   if (acct.role === 'admin') return true;
   if (acct.role === 'teacher') return p.roomId === BANK;
+  if (acct.role === 'student') return p.ownerCode === acct.code || (!!acct.roomId && p.roomId === acct.roomId);
   return p.roomId === acct.roomId;
 }
 function canEditPuzzle_(acct, p, room) {
   if (acct.role === 'admin') return true;
   if (acct.role === 'teacher') return p.roomId === BANK && p.ownerCode === acct.code;
+  // 學生只改自己的題目；題目要在自己目前這一組（或兩邊都還沒分組），組別送審後鎖定
+  if (acct.role === 'student') return p.ownerCode === acct.code && (p.roomId || '') === (acct.roomId || '') &&
+    (!room || room.status === 'draft');
   return p.roomId === acct.roomId && room && room.status === 'draft';
 }
 function canEditRoom_(acct, room) {
   if (acct.role === 'admin') return true;
+  if (acct.role === 'student') return room.id === acct.roomId && room.leaderCode === acct.code && room.status === 'draft';
   return acct.role === 'group' && room.id === acct.roomId && room.status === 'draft';
 }
 
@@ -356,11 +369,118 @@ function canEditRoom_(acct, room) {
 
 function login(code) {
   var a = account_(code);
-  return {
+  var out = {
     code: a.code, role: a.role, name: a.name, members: a.membersList,
     roomId: a.roomId, settings: settings_(), appUrl: appUrl_()
   };
+  if (a.role === 'student') {
+    out.school = a.school || '';
+    out.email = a.email || '';
+    var room = a.roomId ? getDoc_('Rooms', a.roomId) : null;
+    out.members = room ? membersOfRoom_(room) : [];
+  }
+  return out;
 }
+/* ============================================================
+ *  學生用 Google 帳號登入
+ *  畫面用 Firebase 登入後，把憑證送來這裡；確認是哪個 email 之後，回傳這位學生的個人代碼。
+ *  之後的每個動作都用個人代碼，跟分組代碼、老師代碼一樣。
+ * ============================================================ */
+
+/** tok: { idToken: Firebase 的登入憑證, googleIdToken: Google 的登入憑證（兩個有一個驗得過就好） } */
+function verifyGoogle_(tok) {
+  tok = tok || {};
+  var why = '';
+  if (tok.idToken) {
+    try {
+      var r = UrlFetchApp.fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + FIREBASE_API_KEY, {
+        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        headers: { Referer: FRONT_ORIGIN }, payload: JSON.stringify({ idToken: String(tok.idToken) })
+      });
+      var j = JSON.parse(r.getContentText() || '{}');
+      var u = j.users && j.users[0];
+      if (r.getResponseCode() === 200 && u && u.email) {
+        if (u.emailVerified === false) throw new Error('這個 Google 帳號的 email 還沒驗證');
+        return { email: String(u.email).toLowerCase(), name: u.displayName || '' };
+      }
+      why = (j.error && j.error.message) || ('HTTP ' + r.getResponseCode());
+    } catch (e) { why = e.message; }
+  }
+  if (tok.googleIdToken) {
+    try {
+      var r2 = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(String(tok.googleIdToken)), { muteHttpExceptions: true });
+      var g = JSON.parse(r2.getContentText() || '{}');
+      // aud 是 Firebase 專案的登入用戶端，用專案編號開頭，確認是我們這個專案發的
+      var okAud = String(g.aud || '').indexOf(FIREBASE_PROJECT_NUMBER + '-') === 0;
+      var okIss = /^(https:\/\/)?accounts\.google\.com$/.test(String(g.iss || ''));
+      var okExp = Number(g.exp || 0) * 1000 > nowMs_();
+      if (r2.getResponseCode() === 200 && okAud && okIss && okExp && g.email && String(g.email_verified) === 'true') {
+        return { email: String(g.email).toLowerCase(), name: g.name || '' };
+      }
+      why = why || g.error_description || g.error || '憑證不符';
+    } catch (e2) { why = why || e2.message; }
+  }
+  throw new Error('Google 登入驗證失敗，請重新登入' + (why ? '（' + why + '）' : ''));
+}
+function studentByEmail_(email) {
+  email = String(email || '').toLowerCase();
+  if (!email) return null;
+  return codes_().filter(function (r) { return r.role === 'student' && String(r.email || '').toLowerCase() === email; })[0] || null;
+}
+/** 用 Google 登入：已經加入過的學生直接回傳登入資料；第一次來的回傳 needJoin，請他填姓名與加入碼 */
+function studentLogin(tok) {
+  var who = verifyGoogle_(tok);
+  var st = studentByEmail_(who.email);
+  if (st) return { me: login(st.code) };
+  return { needJoin: true, email: who.email, name: who.name, joinOpen: !!prop_('JOIN_CODE') };
+}
+/**
+ * 第一次加入：info = { name, school, joinCode } 用老師公布的加入碼建立帳號；
+ * 或 { personalCode } 把老師事先建好的個人代碼綁到這個 Google 帳號（之後就能用 Google 登入）。
+ */
+function studentJoin(tok, info) {
+  var who = verifyGoogle_(tok);
+  info = info || {};
+  return withLock_(function () {
+    var st = studentByEmail_(who.email);
+    if (st) return { me: login(st.code) };
+    var rows = readAll_('Codes');
+    var pc = String(info.personalCode || '').trim().toUpperCase();
+    if (pc) {
+      var mine = rows.filter(function (r) { return r.role === 'student' && String(r.code).toUpperCase() === pc; })[0];
+      if (!mine) throw new Error('個人代碼不正確，請再確認一次');
+      if (mine.email) throw new Error('這個個人代碼已經綁定別的 Google 帳號了，請找老師');
+      mine.email = who.email;
+      writeRow_('Codes', mine._row, mine);
+      return { me: login(mine.code) };
+    }
+    var jc = prop_('JOIN_CODE') || '';
+    if (!jc) throw new Error('老師還沒開放加入，請找老師');
+    if (String(info.joinCode || '').trim().toUpperCase() !== jc) throw new Error('加入碼不正確，請看老師公布的加入碼');
+    var name = String(info.name || '').trim();
+    var school = String(info.school || '').trim();
+    if (!name) throw new Error('請填姓名');
+    if (name.length > 20) throw new Error('姓名太長了');
+    if (school.length > 30) throw new Error('學校／班級太長了');
+    var c = newStudentCode_(rows);
+    appendRow_('Codes', { code: c, role: 'student', name: name, members: '', roomId: '', created: nowStr_(), email: who.email, school: school });
+    ensureHeader_('Codes');
+    return { me: login(c) };
+  });
+}
+function newStudentCode_(rows) {
+  var used = rows.map(function (r) { return r.code; }), c;
+  do { c = 'S' + randCode_(5); } while (used.indexOf(c) >= 0);
+  return c;
+}
+/** 舊的試算表少了新欄位的標題時補上（只是給人看，程式照欄位順序讀） */
+function ensureHeader_(name) {
+  var cols = SHEETS[name];
+  var sh = sheet_(name);
+  var head = sh.getRange(1, 1, 1, cols.length).getValues()[0];
+  if (head[cols.length - 1] !== cols[cols.length - 1]) sh.getRange(1, 1, 1, cols.length).setValues([cols]);
+}
+
 /** 給學生的網址：有設定 FRONT_URL（例如 GitHub Pages）就用它，否則用 Apps Script 網址 */
 function appUrl_() {
   var front = prop_('FRONT_URL');
@@ -383,6 +503,7 @@ function getWorkspace(code) {
       editable: room.status === 'draft'
     };
   }
+  if (a.role === 'student') return studentWorkspace_(a, s);
   if (a.role === 'teacher') {
     var bank = allDocs_('Puzzles').filter(function (p) { return p.roomId === BANK && !p.deleted; });
     return {
@@ -395,6 +516,35 @@ function getWorkspace(code) {
   }
   throw new Error('管理者請使用總覽頁');
 }
+/** 學生的工作區：還沒分組時只有自己的題目；分組後是整組的題目（別人的唯讀），組長另外能改密室資訊、排序、送審 */
+function studentWorkspace_(a, s) {
+  var room = a.roomId ? getDoc_('Rooms', a.roomId) : null;
+  if (room && room.deleted) room = null;
+  var puzzles = room ? roomPuzzles_(room) : allDocs_('Puzzles').filter(function (p) {
+    return p.ownerCode === a.code && !p.deleted && !p.roomId;
+  });
+  var me = { name: a.name, code: a.code, school: a.school || '', email: a.email || '' };
+  var list = puzzles.map(function (p) {
+    var x = withChecks_(p, s, 'group');
+    x.editable = canEditPuzzle_(a, p, room);
+    x.mine = p.ownerCode === a.code;
+    return x;
+  });
+  if (!room) return { student: true, me: me, room: null, puzzles: list, roomChecks: [], editable: true, isLeader: false, members: [] };
+  var studs = studentsOfRoom_(room.id);
+  var leader = studs.filter(function (r) { return r.code === room.leaderCode; })[0];
+  return {
+    student: true, me: me,
+    room: stripRow_(room),
+    puzzles: list,
+    roomChecks: checkRoom_(room, puzzles, s, membersOfRoom_(room), false),
+    editable: room.status === 'draft',
+    isLeader: room.leaderCode === a.code,
+    leaderName: leader ? leader.name : '',
+    members: membersOfRoom_(room)
+  };
+}
+
 /** saved：剛存好的那一題，直接用它，不必再讀一次 */
 function roomPuzzles_(room, saved) {
   var byId = getDocs_('Puzzles', room.puzzleIds || []);
@@ -414,8 +564,10 @@ function withChecks_(p, s, kind) {
 
 function blankPuzzle_(a, s) {
   return {
-    id: newId_('p'), roomId: a.role === 'teacher' ? BANK : a.roomId, ownerCode: a.code,
-    author: a.role === 'teacher' ? a.name : '', title: '', kind: '', estMinutes: '',
+    id: newId_('p'), roomId: a.role === 'teacher' ? BANK : (a.roomId || ''), ownerCode: a.code,
+    // 學生的題目：設計者固定是本人（署名跟著帳號走，換組也不變）
+    ownerKind: a.role === 'student' ? 'student' : undefined,
+    author: a.role === 'teacher' || a.role === 'student' ? a.name : '', title: '', kind: '', estMinutes: '',
     steps: [{ get: '', act: '', result: '', checkpoint: '' }],
     blocks: [], answer: '', hints: [{ text: '', delaySec: s.defaultHintDelaySec }],
     props: [], themeLink: '', scienceBasis: '', reskinCheck: '', rev: 0, deleted: false
@@ -424,12 +576,13 @@ function blankPuzzle_(a, s) {
 
 function newPuzzle(code) {
   var a = account_(code);
-  needRole_(a, ['group', 'teacher']);
+  needRole_(a, ['group', 'teacher', 'student']);
   return withLock_(function () {
     var s = settings_();
     var p = blankPuzzle_(a, s);
-    if (a.role === 'group') {
+    if (a.role === 'group' || (a.role === 'student' && a.roomId)) {
       var room = getDoc_('Rooms', a.roomId);
+      if (!room || room.deleted) throw new Error('找不到你這一組的密室，請找老師');
       if (room.status !== 'draft') throw new Error('已送審，不能新增題目。要修改請找老師開放');
       room.puzzleIds = (room.puzzleIds || []).concat([p.id]);
       putDoc_('Rooms', room);
@@ -448,7 +601,7 @@ function savePuzzle(code, data) {
     var s = settings_();
     var p = getDoc_('Puzzles', data.id);
     if (!p || p.deleted) throw new Error('找不到這一題，可能已被刪除');
-    var room = p.roomId === BANK ? null : getDoc_('Rooms', p.roomId);
+    var room = p.roomId === BANK || !p.roomId ? null : getDoc_('Rooms', p.roomId);
     if (!canEditPuzzle_(a, p, room)) {
       if (room && room.status !== 'draft') throw new Error('已送審，不能修改。要修改請找老師開放');
       throw new Error('只能修改自己的題目');
@@ -457,7 +610,7 @@ function savePuzzle(code, data) {
       return { conflict: true, puzzle: withChecks_(p, s, p.roomId === BANK ? 'teacher' : 'group') };
     }
     PUZZLE_FIELDS.forEach(function (f) { if (data[f] !== undefined) p[f] = data[f]; });
-    if (a.role === 'teacher') p.author = a.name;
+    if (a.role === 'teacher' || a.role === 'student') p.author = a.name;
     p.rev = (p.rev || 0) + 1;
     putDoc_('Puzzles', p);
     return { p: p, room: room, s: s };
@@ -478,7 +631,7 @@ function deletePuzzle(code, id) {
   return withLock_(function () {
     var p = getDoc_('Puzzles', id);
     if (!p) return true;
-    var room = p.roomId === BANK ? null : getDoc_('Rooms', p.roomId);
+    var room = p.roomId === BANK || !p.roomId ? null : getDoc_('Rooms', p.roomId);
     if (!canEditPuzzle_(a, p, room)) throw new Error('不能刪除這一題');
     p.deleted = true;
     putDoc_('Puzzles', p);
@@ -493,10 +646,10 @@ function deletePuzzle(code, id) {
 function movePuzzle(code, id, dir) {
   var a = account_(code);
   return withLock_(function () {
-    var roomId = a.role === 'group' ? a.roomId : null;
+    var roomId = a.role === 'group' || a.role === 'student' ? a.roomId : null;
     if (!roomId) throw new Error('只有分組可以調整順序');
     var room = getDoc_('Rooms', roomId);
-    if (!canEditRoom_(a, room)) throw new Error('已送審，不能調整順序');
+    if (!canEditRoom_(a, room)) throw new Error(a.role === 'student' && room.status === 'draft' && room.leaderCode !== a.code ? '題目順序由組長調整' : '已送審，不能調整順序');
     var ids = room.puzzleIds || [];
     var i = ids.indexOf(id), j = i + (dir < 0 ? -1 : 1);
     if (i < 0 || j < 0 || j >= ids.length) return ids;
@@ -522,7 +675,8 @@ function saveRoom(code, data) {
     var room = getDoc_('Rooms', data.id);
     if (!room) throw new Error('找不到密室');
     if (!canEditRoom_(a, room)) {
-      if (a.role === 'group' && room.id === a.roomId) throw new Error('已送審，不能修改。要修改請找老師開放');
+      if ((a.role === 'group' || a.role === 'student') && room.id === a.roomId && room.status !== 'draft') throw new Error('已送審，不能修改。要修改請找老師開放');
+      if (a.role === 'student' && room.id === a.roomId) throw new Error('密室資訊由組長負責修改');
       throw new Error('沒有權限修改這個密室');
     }
     if ((data.rev || 0) !== (room.rev || 0)) return { conflict: true, room: stripRow_(room) };
@@ -572,10 +726,19 @@ function roomVault_(room) {
   return (room.vaultIds || []).map(function (id) { return byId[id]; })
     .filter(function (p) { return p && !p.deleted; });
 }
+/** 組員名單：分組代碼上手打的名字（舊做法）＋被分到這一組的學生（新做法） */
 function membersOfRoom_(room) {
   if (room.kind !== 'group') return [];
-  var c = codes_().filter(function (r) { return r.code === room.ownerCode; })[0];
-  return c ? String(c.members || '').split(/[,，、\s]+/).filter(function (x) { return x; }) : [];
+  var rows = codes_();
+  var c = rows.filter(function (r) { return r.code === room.ownerCode; })[0];
+  var names = c ? String(c.members || '').split(/[,，、\s]+/).filter(function (x) { return x; }) : [];
+  rows.forEach(function (r) {
+    if (r.role === 'student' && r.roomId === room.id && names.indexOf(r.name) < 0) names.push(r.name);
+  });
+  return names;
+}
+function studentsOfRoom_(roomId) {
+  return codes_().filter(function (r) { return r.role === 'student' && roomId && r.roomId === roomId; });
 }
 
 /* ============================================================
@@ -591,9 +754,10 @@ var MAX_UPLOAD = 8 * 1024 * 1024;
 function uploadFile(code, meta, payload, isText) {
   var a = account_(code);
   var roomId = meta.roomId || (a.role === 'teacher' ? BANK : a.roomId);
+  if (a.role === 'student') roomId = a.roomId || ''; // 學生一律放在自己目前的組（還沒分組就是空白）
   if (a.role === 'group' && roomId !== a.roomId) throw new Error('只能上傳到自己組的密室');
   if (a.role === 'teacher' && roomId !== BANK) throw new Error('老師的檔案只能放在題庫');
-  if (a.role === 'group') {
+  if (a.role === 'group' || (a.role === 'student' && roomId)) {
     var room = getDoc_('Rooms', a.roomId);
     if (room.status !== 'draft') throw new Error('已送審，不能上傳。要修改請找老師開放');
   }
@@ -618,6 +782,7 @@ function fileName_(a, roomId, meta) {
   var ext = (String(meta.name || '').match(/\.[A-Za-z0-9]{1,5}$/) || [''])[0].toLowerCase();
   var who, num = '';
   if (roomId === BANK) who = '題庫-' + a.name;
+  else if (!roomId) who = '未分組-' + a.name;
   else {
     var room = getDoc_('Rooms', roomId);
     who = (room && (room.groupName || room.title)) || roomId;
@@ -633,7 +798,7 @@ function fileName_(a, roomId, meta) {
 
 function folderFor_(a, roomId) {
   var up = DriveApp.getFolderById(prop_('UP_ID'));
-  var name = roomId === BANK ? '老師題庫' : (function () {
+  var name = roomId === BANK ? '老師題庫' : !roomId ? '未分組' : (function () {
     var room = getDoc_('Rooms', roomId);
     return (room && (room.groupName || room.title)) || roomId;
   })();
@@ -652,9 +817,18 @@ function getFileData(code, fileId) {
   var a = account_(code);
   var row = fileRow_(fileId);
   if (!row) throw new Error('找不到檔案');
-  if (a.role === 'group' && row.roomId !== a.roomId) throw new Error('沒有權限讀取這個檔案');
+  if ((a.role === 'group' || a.role === 'student') && !canReadFile_(a, row)) throw new Error('沒有權限讀取這個檔案');
   if (a.role === 'teacher' && row.roomId !== BANK) throw new Error('沒有權限讀取這個檔案');
   return fileData_(fileId, row.mime);
+}
+/** 分組與學生：自己組的檔案、自己上傳的檔案、或目前同組學生上傳的檔案（換組前上傳的也算） */
+function canReadFile_(a, row) {
+  if (row.ownerCode === a.code) return true;
+  if (!a.roomId) return false;
+  var o = codes_().filter(function (c) { return c.code === row.ownerCode; })[0];
+  // 學生上傳的檔案跟著人走：看上傳者現在在哪一組，不看上傳當時在哪一組
+  if (o && o.role === 'student') return o.roomId === a.roomId;
+  return row.roomId === a.roomId;
 }
 function fileData_(fileId, mime) {
   var blob = DriveApp.getFileById(fileId).getBlob();
@@ -843,13 +1017,15 @@ function summary_(checks) {
 
 function submitRoom(code) {
   var a = account_(code);
-  needRole_(a, ['group']);
+  needRole_(a, ['group', 'student']);
   return withLock_(function () {
     var s = settings_();
+    if (!a.roomId) throw new Error('還沒分組，不能送審');
     var room = getDoc_('Rooms', a.roomId);
     if (room.status !== 'draft') throw new Error('已經送審過了');
+    if (a.role === 'student' && room.leaderCode !== a.code) throw new Error('送審由組長負責');
     var puzzles = roomPuzzles_(room);
-    var checks = checkRoom_(room, puzzles, s, a.membersList, true);
+    var checks = checkRoom_(room, puzzles, s, membersOfRoom_(room), true);
     if (summary_(checks).err) return { ok: false, roomChecks: checks };
     room.status = 'submitted';
     room.submittedAt = nowStr_();
@@ -1130,7 +1306,10 @@ function cleanMembers_(m) {
 /** 作者或管理者試玩（用目前內容做一份測試快照，不計入數據） */
 function startTestPlay(code, roomId) {
   var a = account_(code);
-  if (a.role === 'group') roomId = a.roomId;
+  if (a.role === 'group' || a.role === 'student') {
+    roomId = a.roomId;
+    if (!roomId) throw new Error('還沒分組，分組後才能試玩整間');
+  }
   else needRole_(a, ['admin']);
   var room = getDoc_('Rooms', roomId);
   if (!room) throw new Error('找不到密室');
@@ -1555,9 +1734,14 @@ function adminOverview(code) {
       updated: p.updated, summary: summary_(checkPuzzle_(p, s, 'teacher', false))
     };
   });
+  var own = {};
+  puzzles.forEach(function (p) { if (p.roomId !== BANK) own[p.ownerCode] = (own[p.ownerCode] || 0) + 1; });
   return {
-    settings: s, appUrl: appUrl_(),
-    codes: codes.map(function (c) { return { code: c.code, role: c.role, name: c.name, members: c.members, roomId: c.roomId }; }),
+    settings: s, appUrl: appUrl_(), joinCode: prop_('JOIN_CODE') || '',
+    codes: codes.filter(function (c) { return c.role !== 'student'; }).map(function (c) { return { code: c.code, role: c.role, name: c.name, members: c.members, roomId: c.roomId }; }),
+    students: codes.filter(function (c) { return c.role === 'student'; }).map(function (c) {
+      return { code: c.code, name: c.name, school: c.school || '', email: c.email || '', roomId: c.roomId || '', puzzles: own[c.code] || 0, created: c.created };
+    }),
     rooms: rooms, bank: bank
   };
 }
@@ -1619,6 +1803,148 @@ function adminCreateTeachers(code, names) {
     return made;
   });
 }
+/* ---------- 學生名單與分組（管理者） ---------- */
+
+/** action: 'new' 產生新的加入碼（舊的立即失效）；'close' 關閉加入；其他：只回傳目前的加入碼 */
+function adminJoinCode(code, action) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  var props = PropertiesService.getScriptProperties();
+  if (action === 'new') props.setProperty('JOIN_CODE', randCode_(4));
+  if (action === 'close') props.setProperty('JOIN_CODE', '');
+  return prop_('JOIN_CODE') || '';
+}
+/** 沒辦法用 Google 登入的學生：老師直接建一個個人代碼。list: [{ name, school }] */
+function adminCreateStudents(code, list) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  return withLock_(function () {
+    var rows = readAll_('Codes'), made = [];
+    (list || []).forEach(function (x) {
+      var name = String((x && x.name) || '').trim().slice(0, 20);
+      if (!name) return;
+      var c = newStudentCode_(rows);
+      rows.push({ code: c });
+      appendRow_('Codes', { code: c, role: 'student', name: name, members: '', roomId: '', created: nowStr_(), email: '', school: String(x.school || '').trim().slice(0, 30) });
+      made.push({ code: c, name: name });
+    });
+    ensureHeader_('Codes');
+    return made;
+  });
+}
+function studentRow_(rows, sc) {
+  var r = rows.filter(function (x) { return x.code === sc && x.role === 'student'; })[0];
+  if (!r) throw new Error('找不到這位學生');
+  return r;
+}
+/** 改姓名、學校班級；clearEmail 解除 Google 綁定（換帳號時用）。改名時，他設計的題目署名一起改 */
+function adminUpdateStudent(code, sc, data) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  data = data || {};
+  return withLock_(function () {
+    var r = studentRow_(readAll_('Codes'), sc);
+    var old = r.name;
+    if (data.name !== undefined && String(data.name).trim()) r.name = String(data.name).trim().slice(0, 20);
+    if (data.school !== undefined) r.school = String(data.school).trim().slice(0, 30);
+    if (data.clearEmail) r.email = '';
+    writeRow_('Codes', r._row, r);
+    if (r.name !== old) {
+      allDocs_('Puzzles').forEach(function (p) {
+        if (p.ownerCode === r.code && !p.deleted) { p.author = r.name; putDoc_('Puzzles', p); }
+      });
+    }
+    return true;
+  });
+}
+/** 刪除學生：只限沒有題目的（例如重複加入的帳號） */
+function adminDeleteStudent(code, sc) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  return withLock_(function () {
+    var r = studentRow_(readAll_('Codes'), sc);
+    var n = allDocs_('Puzzles').filter(function (p) { return p.ownerCode === r.code && !p.deleted; }).length;
+    if (n) throw new Error('「' + r.name + '」還有 ' + n + ' 題，不能刪除');
+    if (r.roomId) {
+      var room = getDoc_('Rooms', r.roomId);
+      if (room && room.leaderCode === r.code) { room.leaderCode = ''; putDoc_('Rooms', room); }
+    }
+    sheet_('Codes').deleteRow(r._row);
+    forget_('Codes', true);
+    var room2 = r.roomId ? getDoc_('Rooms', r.roomId) : null;
+    if (room2 && !room2.leaderCode) { autoLeader_(room2); putDoc_('Rooms', room2); }
+    return true;
+  });
+}
+/** 組長不在組裡（或還沒有）時，指定組裡第一位學生 */
+function autoLeader_(room) {
+  var studs = studentsOfRoom_(room.id);
+  if (studs.some(function (x) { return x.code === room.leaderCode; })) return false;
+  var next = studs[0] ? studs[0].code : '';
+  if ((room.leaderCode || '') === next) return false;
+  room.leaderCode = next;
+  return true;
+}
+/**
+ * 把學生分到某一組（roomId 空白 = 移回未分組）。
+ * 預設題目跟著人走：他設計的題目從原組移到新組；opts.keepPuzzles 時題目留在原組（由原組保管，他就不能再改）。
+ */
+function adminAssignStudent(code, sc, roomId, opts) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  roomId = String(roomId || '');
+  opts = opts || {};
+  return withLock_(function () {
+    var r = studentRow_(readAll_('Codes'), sc);
+    var from = r.roomId || '';
+    if (from === roomId) return { moved: 0 };
+    var to = roomId ? getDoc_('Rooms', roomId) : null;
+    if (roomId && (!to || to.deleted || to.kind !== 'group')) throw new Error('找不到這一組');
+    var old = from ? getDoc_('Rooms', from) : null;
+    if (old && old.deleted) old = null;
+    var mine = allDocs_('Puzzles').filter(function (p) { return p.ownerCode === r.code && !p.deleted && (p.roomId || '') === from; });
+    var carry = !opts.keepPuzzles && mine.length;
+    if (carry) {
+      var label = function (room) { return '「' + (room.groupName || room.title) + '」'; };
+      if (old && old.status !== 'draft') throw new Error(label(old) + '已送審，題目移不出來。請先按「開放修改」，或勾選「題目留在原組」');
+      if (to && to.status !== 'draft') throw new Error(label(to) + '已送審，題目放不進去。請先按「開放修改」');
+    }
+    r.roomId = roomId;
+    writeRow_('Codes', r._row, r);
+    var ids = carry ? mine.map(function (p) { return p.id; }) : [];
+    if (carry) mine.forEach(function (p) { p.roomId = roomId; putDoc_('Puzzles', p); });
+    if (old) {
+      var ch = false;
+      if (ids.length) {
+        old.puzzleIds = (old.puzzleIds || []).filter(function (x) { return ids.indexOf(x) < 0; });
+        if (old.places) ids.forEach(function (x) { delete old.places[x]; });
+        ch = true;
+      }
+      if (old.leaderCode === r.code) { old.leaderCode = ''; autoLeader_(old); ch = true; }
+      if (ch) putDoc_('Rooms', old);
+    }
+    if (to) {
+      var ch2 = false;
+      if (ids.length) { to.puzzleIds = (to.puzzleIds || []).concat(ids); ch2 = true; }
+      if (autoLeader_(to)) ch2 = true;
+      if (ch2) putDoc_('Rooms', to);
+    }
+    return { moved: ids.length };
+  });
+}
+function adminSetLeader(code, roomId, sc) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  return withLock_(function () {
+    var room = getDoc_('Rooms', roomId);
+    if (!room || room.deleted) throw new Error('找不到這一組');
+    if (sc && !studentsOfRoom_(roomId).some(function (x) { return x.code === sc; })) throw new Error('這位學生不在這一組');
+    room.leaderCode = sc || '';
+    putDoc_('Rooms', room);
+    return true;
+  });
+}
+
 function normMembers_(m) {
   return String(m || '').split(/[,，、\s]+/).filter(function (x) { return x; }).join(',');
 }
@@ -1678,6 +2004,10 @@ function deleteGroups_(targets) {
       room.deleted = true;
       room.deletedAt = nowStr_();
       putDoc_('Rooms', room);
+      // 被分到這一組的學生回到「未分組」
+      codes.forEach(function (c) {
+        if (c.role === 'student' && c.roomId === room.id) { c.roomId = ''; writeRow_('Codes', c._row, c); }
+      });
     }
     rows.push(r._row);
     deleted.push({ code: t, name: r.name });
@@ -1798,13 +2128,16 @@ function getPuzzle(code, id) {
   var p = getDoc_('Puzzles', id);
   if (!p || p.deleted || !canReadPuzzle_(a, p)) throw new Error('找不到題目');
   var x = withChecks_(p, settings_(), p.roomId === BANK ? 'teacher' : 'group');
-  var room = p.roomId === BANK ? null : getDoc_('Rooms', p.roomId);
+  var room = p.roomId === BANK || !p.roomId ? null : getDoc_('Rooms', p.roomId);
   x.editable = canEditPuzzle_(a, p, room);
   return x;
 }
 function getRoom(code, roomId) {
   var a = account_(code);
-  if (a.role === 'group') roomId = a.roomId;
+  if (a.role === 'group' || a.role === 'student') {
+    roomId = a.roomId;
+    if (!roomId) throw new Error('還沒分組');
+  }
   else needRole_(a, ['admin']);
   var room = getDoc_('Rooms', roomId);
   if (!room) throw new Error('找不到密室');

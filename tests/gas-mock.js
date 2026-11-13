@@ -210,6 +210,36 @@ var GasMock = (function () {
       }
     };
     g.Logger = { log: function (m) { logs.push(String(m)); } };
+    // 對外連線：只模擬 Google 登入驗證。憑證寫成 test:email|名字（Firebase）或 gtest:email|名字（Google），其他一律當成無效
+    var fetches = [];
+    var fetchOpts = { firebaseDown: false };
+    function resp(code, obj) {
+      return { getResponseCode: function () { return code; }, getContentText: function () { return JSON.stringify(obj); } };
+    }
+    function parseTok(t, prefix) {
+      t = String(t || '');
+      if (t.indexOf(prefix) !== 0) return null;
+      var x = t.substring(prefix.length).split('|');
+      return { email: x[0], name: x[1] || '' };
+    }
+    g.UrlFetchApp = {
+      fetch: function (url, o) {
+        fetches.push({ url: url, opts: o });
+        if (url.indexOf('identitytoolkit.googleapis.com/v1/accounts:lookup') >= 0) {
+          if (fetchOpts.firebaseDown) return resp(403, { error: { message: 'API_KEY_HTTP_REFERRER_BLOCKED' } });
+          var u = parseTok(JSON.parse(o.payload).idToken, 'test:');
+          if (!u) return resp(400, { error: { message: 'INVALID_ID_TOKEN' } });
+          return resp(200, { users: [{ localId: 'u1', email: u.email, displayName: u.name, emailVerified: true }] });
+        }
+        if (url.indexOf('oauth2.googleapis.com/tokeninfo') >= 0) {
+          var gt = parseTok(decodeURIComponent(url.split('id_token=')[1] || ''), 'gtest:');
+          if (!gt) return resp(400, { error: 'invalid_token' });
+          return resp(200, { aud: '12080862626-abc.apps.googleusercontent.com', iss: 'https://accounts.google.com', exp: String(Math.floor(Date.now() / 1000) + 3600),
+            email: gt.email, email_verified: 'true', name: gt.name });
+        }
+        throw new Error('模擬環境不允許連線：' + url);
+      }
+    };
     g.ScriptApp = { getService: function () { return { getUrl: function () { return 'https://script.google.com/macros/s/TEST/exec'; } }; } };
     g.ContentService = {
       MimeType: { JSON: 'application/json' },
@@ -247,6 +277,8 @@ var GasMock = (function () {
     return {
       logs: logs,
       props: props,
+      fetches: fetches,
+      fetchOpts: fetchOpts,
       files: files,
       spreadsheets: spreadsheets,
       lockDepth: function () { return locked; },

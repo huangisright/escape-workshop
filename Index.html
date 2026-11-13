@@ -22,7 +22,7 @@ button,input,select,textarea{font:inherit}
 .card h3 .no{display:inline-block;width:26px;height:26px;border-radius:50%;background:var(--acc);color:#fff;text-align:center;line-height:26px;font-size:14px;margin-right:6px}
 .help{color:var(--muted);font-size:14px;margin:0 0 10px}
 label.f{display:block;font-size:14px;color:var(--muted);margin:10px 0 4px}
-input[type=text],input[type=number],input[type=url],textarea,select{width:100%;padding:10px 12px;border:1px solid #cfc9bd;border-radius:10px;background:#fff;color:var(--ink)}
+input[type=text],input[type=password],input[type=number],input[type=url],textarea,select{width:100%;padding:10px 12px;border:1px solid #cfc9bd;border-radius:10px;background:#fff;color:var(--ink)}
 input:disabled,textarea:disabled,select:disabled{background:#f3f1ec;color:#555}
 textarea{min-height:84px;resize:vertical}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
@@ -1001,16 +1001,19 @@ function showLogin(msg) {
   app.innerHTML = '<div class="login"><h1>密室工坊</h1><p class="muted">上傳謎題、檢核、遊玩，都在這裡。</p>' +
     '<div class="card"><h3>學生：設計謎題</h3><p class="help">用自己的 Google 帳號登入。第一次登入要填姓名和老師公布的加入碼。</p>' +
     '<button class="gbtn" data-act="googleLogin">' + G_ICON + '用 Google 帳號登入</button>' +
-    '<div class="or">或輸入代碼（老師代碼、個人代碼、分組代碼）</div>' +
-    secretInput('code', '例如 SAB12C') +
+    '<div class="or">或輸入個人代碼、分組代碼</div>' +
+    '<input type="text" id="code" placeholder="例如 SAB12C" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
     '<div class="btns"><button class="btn ghost" data-act="login">進入</button></div>' + (msg ? '<p style="color:var(--err)">' + esc(msg) + '</p>' : '') + '</div>' +
     '<div class="card"><h3>我是玩家</h3><p class="help">輸入遊戲代碼開始玩。</p>' +
     '<input type="text" id="pcode" placeholder="例如 P7KQ2" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
-    '<div class="btns"><button class="btn ghost" data-act="toPlay">開始</button></div></div></div>';
+    '<div class="btns"><button class="btn ghost" data-act="toPlay">開始</button></div></div>' +
+    '<div class="card"><h3>老師登入</h3><p class="help">老師代碼、管理者代碼。輸入時會遮住，投影時不會外流。</p>' +
+    secretInput('tcode', '老師或管理者代碼') +
+    '<div class="btns"><button class="btn ghost" data-act="tlogin">進入</button></div></div></div>';
 }
-/** 代碼輸入框：預設遮住（避免投影或旁人看到），按「顯示」才看得到 */
+/** 老師／管理者代碼輸入框：預設遮住（避免投影或旁人看到），按「顯示」才看得到 */
 function secretInput(id, ph) {
-  return '<div class="row" style="align-items:center;gap:8px;flex-wrap:nowrap"><input type="password" id="' + id + '" placeholder="' + esc(ph) + '" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0">' +
+  return '<div style="display:flex;align-items:center;gap:8px"><input type="password" id="' + id + '" placeholder="' + esc(ph) + '" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0">' +
     '<button type="button" class="btn ghost sm" style="flex:none" data-act="peek" data-for="' + id + '" aria-pressed="false">顯示</button></div>';
 }
 /** Google 登入後：已加入的學生直接進入；第一次來的填姓名與加入碼 */
@@ -1035,7 +1038,7 @@ function showJoin(r, msg) {
     (msg ? '<p style="color:var(--err)">' + esc(msg) + '</p>' : '') +
     '<div class="btns"><button class="btn" data-act="joinGo">加入</button><button class="btn ghost" data-act="joinBack">換一個帳號</button></div></div>' +
     '<div class="card"><h3>老師已經給我個人代碼了</h3><p class="help">輸入個人代碼，綁定這個 Google 帳號，之後就能直接用 Google 登入。</p>' +
-    secretInput('jPersonal', '例如 SAB12C') +
+    '<input type="text" id="jPersonal" placeholder="例如 SAB12C" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
     '<div class="btns"><button class="btn ghost" data-act="joinBind">綁定</button></div></div></div>';
 }
 function sendJoin(info) {
@@ -2446,6 +2449,7 @@ document.addEventListener('click', function (e) {
 var ACTIONS = {
   closeModal: function () { closeModal(); },
   login: function () { var c = document.getElementById('code').value.trim(); if (!c) return toast('請輸入代碼', 'err'); doLogin(c); },
+  tlogin: function () { var c = document.getElementById('tcode').value.trim(); if (!c) return toast('請輸入代碼', 'err'); doLogin(c); },
   toPlay: function () { var c = document.getElementById('pcode').value.trim().toUpperCase(); if (!c) return toast('請輸入遊戲代碼', 'err'); showPlayEntry(c); },
   resumeYes: function () { resumePlay(S.resumeRef); },
   resumeNo: function () { var c = S.resumeParams.c || store('erCode'); c ? doLogin(c, true) : showLogin(); },
@@ -2773,6 +2777,7 @@ var ACTIONS = {
 };
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && e.target.id === 'code') ACTIONS.login();
+  if (e.key === 'Enter' && e.target.id === 'tcode') ACTIONS.tlogin();
   if (e.key === 'Enter' && e.target.id === 'pcode') ACTIONS.toPlay();
   // 地圖上的島／拼圖／星球是 SVG，要自己處理鍵盤操作
   var t = e.target;

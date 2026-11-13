@@ -1384,12 +1384,22 @@ function previewPuzzle(p) {
   setGate();
   renderPlayBlocks(d.querySelector('#pvBlocks'), (p.blocks || []).map(function (b) { return b; }), true);
   d.querySelectorAll('.phint img[data-file]').forEach(function (el) { hydrateFiles(el.parentNode); });
+  var coolSec = Number(((S.me || {}).settings || {}).wrongCooldownSec) || 0, coolAt = 0;
+  var cool = function () { // 答錯冷卻：跟正式遊玩一樣，等幾秒才能再答
+    var btn = d.querySelector('#pvGo'), m = d.querySelector('#pvMsg');
+    if (!btn || !document.body.contains(btn)) return;
+    var left = Math.ceil((coolAt - Date.now()) / 1000);
+    if (left > 0) { btn.disabled = true; m.className = 'pmsg bad'; m.textContent = '答案不對，' + left + ' 秒後可以再答'; setTimeout(cool, 250); }
+    else { btn.disabled = false; m.className = 'pmsg'; m.textContent = ''; }
+  };
   d.querySelector('#pvGo').onclick = function () {
+    if (Date.now() < coolAt) return;
     var v = d.querySelector('#pvIn').value, m = d.querySelector('#pvMsg');
     if (norm(v) && gates[g].answers.some(function (a) { return norm(a) === norm(v); })) {
       if (g < gates.length - 1) { g++; setGate(); m.className = 'pmsg good'; m.textContent = '正確！繼續下一步'; d.querySelector('#pvIn').value = ''; }
       else { m.className = 'pmsg good'; m.textContent = '答對了！這題完成'; }
-    } else { m.className = 'pmsg bad'; m.textContent = '答案不對'; }
+    } else if (coolSec > 0) { coolAt = Date.now() + coolSec * 1000; cool(); }
+    else { m.className = 'pmsg bad'; m.textContent = '答案不對'; }
   };
 }
 

@@ -673,3 +673,21 @@ test('關卡位置：挑題時填地點 → 發布 → 玩家看到本題地點�
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
+
+test('登入代碼預設遮住，按「顯示」才看得到，小寫照樣能登入', { skip: !chromium }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const { page, errors } = await openPage(browser, { width: 768, height: 1024 });
+    const A = await page.evaluate(() => { GAS('setup')(); return GAS('adminCode_')(); });
+    assert.equal(await page.getAttribute('#code', 'type'), 'password', '代碼一開始是遮住的');
+    await page.fill('#code', A.toLowerCase());
+    await page.click('[data-act="peek"][data-for="code"]');
+    assert.equal(await page.getAttribute('#code', 'type'), 'text', '按「顯示」後看得到');
+    assert.equal((await page.textContent('[data-act="peek"][data-for="code"]')).trim(), '隱藏');
+    await page.click('[data-act="peek"][data-for="code"]');
+    assert.equal(await page.getAttribute('#code', 'type'), 'password', '再按一次又遮住');
+    await page.press('#code', 'Enter');
+    await page.waitForSelector('[data-act=adminTab]');
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});

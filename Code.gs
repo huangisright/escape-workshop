@@ -30,7 +30,7 @@ var DEFAULT_SETTINGS = {
   minPuzzlesPerMember: 1,
   maxPuzzlesPerMember: 2,
   answerMaxLen: 10,         // 答案字數上限，0 = 不限制
-  wrongCooldownSec: 10,     // 答錯後要等幾秒才能再答
+  wrongCooldownSec: 60,     // 答錯後要等幾秒才能再答
   defaultHintDelaySec: 60,  // 新增提示時的預設秒數
   themeLabel: '主題連結（SDGs 14 永續海洋）',
   requireDigitalAndPhysical: true

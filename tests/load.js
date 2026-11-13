@@ -31,6 +31,8 @@ function load() {
   vm.runInContext(CODE, ctx, { filename: 'Code.gs' });
   ctx.setup();
   const admin = ctx.adminCode_();
+  // 測試裡的時間是照 10 秒冷卻寫的，跟正式預設值（60 秒）脫鉤
+  ctx.adminSaveSettings(admin, { wrongCooldownSec: 10 });
   return {
     gs: ctx,
     mock,

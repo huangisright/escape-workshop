@@ -66,7 +66,7 @@ var API_FUNCTIONS = ['login', 'studentLogin', 'studentJoin', 'getWorkspace', 'ne
   'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
   'adminJoinCode', 'adminCreateStudents', 'adminUpdateStudent', 'adminDeleteStudent', 'adminAssignStudent', 'adminSetLeader',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminSetRoomPlaces', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
-  'adminMaterials', 'adminLive', 'adminStats', 'adminExport'];
+  'adminMaterials', 'adminLive', 'adminStats', 'adminExport', 'islandRooms'];
 
 function doPost(e) {
   var out;
@@ -2170,6 +2170,7 @@ function adminRoomAction(code, roomId, action) {
     } else if (action === 'unpublish') room.published = false;
     else throw new Error('未知的動作');
     putDoc_('Rooms', room);
+    try { CacheService.getScriptCache().remove(ISLAND_CACHE); } catch (e) { } // 密室島馬上看得到
     return stripRow_(room);
   });
 }
@@ -2269,6 +2270,59 @@ function adminStats(code, roomId) {
     perPuzzle: per,
     comments: ratings.filter(function (x) { return x.comment; }).map(function (x) { return x.comment; })
   };
+}
+
+/* ============================================================
+ *  密室島：學生密室的公開展示頁（docs/islands.html，不用登入）
+ *  只列已發布的學生密室，內容取自發布版本（審核過的），不含答案、提示與題目內容。
+ *  名字會公開：密室名稱、組名、組員、各關設計者。遊玩數據不含試玩。
+ * ============================================================ */
+
+var ISLAND_CACHE = 'islands:v1';
+var ISLAND_THEMES = { island: '小島', jigsaw: '拼圖', planet: '星球', list: '清單' };
+
+function islandRooms() {
+  var cache = CacheService.getScriptCache();
+  try { var hit = cache.get(ISLAND_CACHE); if (hit) return JSON.parse(hit); } catch (e) { }
+  var rooms = allDocs_('Rooms').filter(function (r) {
+    return !r.deleted && r.kind === 'group' && r.published && r.publishedVersion;
+  });
+  var byRoom = {};
+  readAll_('Plays').forEach(function (p) {
+    if (!p.started || p.test === '是' || p.test === true) return;
+    (byRoom[p.roomId] = byRoom[p.roomId] || []).push(p);
+  });
+  var clip = function (t, n) { t = String(t || '').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
+  var out = [];
+  rooms.forEach(function (room) {
+    var snap;
+    try { snap = loadSnapshot_(room.publishedVersion); } catch (e) { return; }
+    var sr = snap.room || {};
+    var plays = byRoom[room.id] || [];
+    var escaped = plays.filter(function (p) { return p.result === 'escaped'; });
+    var secs = escaped.map(function (p) {
+      try { return Number(JSON.parse(p.state || '{}').escapeSec); } catch (e) { return 0; }
+    }).filter(function (x) { return x > 0; });
+    var pages = (sr.story || []).map(function (pg) { return pg && pg.text; }).filter(function (t) { return t && String(t).trim(); });
+    out.push({
+      id: room.id,
+      title: sr.title || room.title || '未命名密室',
+      group: sr.groupName || room.groupName || '',
+      theme: ISLAND_THEMES[themeOf_(sr)] || '小島',
+      story: clip(pages[0] || (sr.cover && sr.cover.text) || '', 160),
+      members: membersOfRoom_(room),
+      puzzles: (snap.puzzles || []).map(function (p) { return { title: p.title || '未命名', author: p.author || '' }; }),
+      plays: plays.length,
+      escaped: escaped.length,
+      bestSec: secs.length ? Math.min.apply(null, secs) : null,
+      playCode: room.playCode || '',
+      publishedAt: room.publishedAt || ''
+    });
+  });
+  // 照建立順序（試算表的列序），通常就是第一組、第二組……
+  var res = { campName: settings_().campName, rooms: out, ts: nowStr_() };
+  try { cache.put(ISLAND_CACHE, JSON.stringify(res), 300); } catch (e) { }
+  return res;
 }
 
 /* ============================================================

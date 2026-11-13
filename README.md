@@ -159,6 +159,18 @@
 
 改了地點之後，已發布的密室要按「更新發布版本」才會生效，正在玩的隊伍不受影響。
 
+## 三之四、密室島（學生成果的公開展示頁）
+
+**網址：https://huangisright.github.io/escape-workshop/islands.html**（不用登入，可以直接分享給家長、放在成果發表的大螢幕上）
+
+- 每一間**已發布的學生密室**是一座島，排成一圈；按左右箭頭、鍵盤 ← →，或直接點旁邊的島，那座島就會轉到中間。
+- 右邊列出密室名稱、組名、故事第一頁、各關名稱與設計者、組員，以及挑戰隊伍數、逃脫成功率、最快紀錄（不含試玩）。
+- **名字會公開**（組員、各關設計者）。右上角的按鈕可以暫時改成只顯示組名，例如投影時不想秀出名字。
+- 內容取自**發布版本**，所以只有審核、發布過的內容會上島；答案、提示、題目內容都不會出現。
+- 老師的示範密室不上島。按「下架」就會從島上消失；發布或下架後馬上更新，遊玩數據約每 5 分鐘更新一次。
+- 「登島挑戰這間密室」會帶著玩家代碼打開密室工坊。
+- 頁面原始檔是 `Islands.html`，改完一樣執行 `node tools/build-pages.js` 產生 `docs/islands.html`。
+
 ## 四、營隊當天流程（學生）
 
 | 時間 | 學生 | 你（管理頁） |
@@ -228,7 +240,7 @@
 `tests/` 裡用模擬的 Google 服務（試算表、雲端硬碟等）在電腦上跑 `Code.gs`，不用部署：
 
 ```
-node --test tests/backend.test.js tests/climate.test.js tests/free.test.js tests/api.test.js tests/autosave.test.js tests/offline.test.js tests/places.test.js tests/students.test.js   # 後端
+node --test tests/backend.test.js tests/climate.test.js tests/free.test.js tests/api.test.js tests/autosave.test.js tests/offline.test.js tests/places.test.js tests/students.test.js tests/islands.test.js   # 後端（islands 另含展示頁的瀏覽器測試）
 node --test tests/ui.test.js tests/offline-ui.test.js tests/pages-offline.test.js tests/students-ui.test.js   # 介面（需要 Playwright 與 Chromium）
 node tests/bench.js                                                 # 量每個動作碰試算表幾次、讀多少資料（越少越快）
 ```
@@ -241,6 +253,7 @@ node tests/bench.js                                                 # 量每個�
 - `offline-ui.test.js`：連線玩 → 斷線繼續玩 → 重新整理 → 逃脫 → 連線後自動回傳。
 - `pages-offline.test.js`：用 GitHub Pages 版（真的 fetch、真的 service worker）測整台斷網與「連著 Wi-Fi 但不通」。
 - `students.test.js`：Google 登入驗證（含假憑證、Firebase 不通時改走 Google 憑證）、加入碼、個人代碼綁定、未分組出題、組長權限、換組時題目跟著人走、送審過的組。
+- `islands.test.js`：密室島只列已發布的學生密室、不洩漏答案、數據不含試玩、發布／下架即時更新；展示頁切換與隱藏名字。
 - `students-ui.test.js`：在瀏覽器裡走一遍學生 Google 登入加入 → 出題 → 老師配組、換組長、換組 → 學生看到自己的組；組員唯讀。
 
 模擬環境測不到的事（iPad 上傳、學校網路、多台同時使用）仍然要照第五節實機測試。

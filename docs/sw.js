@@ -15,6 +15,8 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   var u = new URL(req.url);
   if (u.origin !== location.origin) return;
+  // 只接手密室工坊本頁；同網站的其他頁（例如 islands.html）照常連網，免得被存成本頁的離線版
+  if (req.mode === 'navigate' && !/\/(index\.html)?$/.test(u.pathname)) return;
   var key = req.mode === 'navigate' ? './' : req;
   var net = fetch(req).then(function (res) {
     if (res && res.ok) { var cp = res.clone(); caches.open(CACHE).then(function (c) { c.put(key, cp); }); }

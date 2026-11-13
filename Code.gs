@@ -11,7 +11,8 @@ var BANK = 'BANK'; // 老師題庫的 roomId
 
 var SHEETS = {
   // 學生（role = student）：一人一列，email 是 Google 登入的帳號，roomId 是目前被分到的組（空白 = 還沒分組）
-  Codes:     ['code', 'role', 'name', 'members', 'roomId', 'created', 'email', 'school'],
+  // hideName = '是'：這位學生的名字不出現在公開的密室島
+  Codes:     ['code', 'role', 'name', 'members', 'roomId', 'created', 'email', 'school', 'hideName'],
   Rooms:     ['id', 'ownerCode', 'kind', 'title', 'status', 'published', 'playCode', 'updated', 'json'],
   Puzzles:   ['id', 'roomId', 'ownerCode', 'author', 'title', 'kind', 'deleted', 'updated', 'json'],
   Snapshots: ['roomId', 'version', 'ts', 'fileId'],
@@ -33,7 +34,8 @@ var DEFAULT_SETTINGS = {
   wrongCooldownSec: 60,     // 答錯後要等幾秒才能再答
   defaultHintDelaySec: 60,  // 新增提示時的預設秒數
   themeLabel: '主題連結（SDGs 14 永續海洋）',
-  requireDigitalAndPhysical: true
+  requireDigitalAndPhysical: true,
+  islandNames: true         // 密室島要不要公開學生名字（組員、各關設計者）；關掉就只送出組名
 };
 
 var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -1740,7 +1742,7 @@ function adminOverview(code) {
     settings: s, appUrl: appUrl_(), joinCode: prop_('JOIN_CODE') || '',
     codes: codes.filter(function (c) { return c.role !== 'student'; }).map(function (c) { return { code: c.code, role: c.role, name: c.name, members: c.members, roomId: c.roomId }; }),
     students: codes.filter(function (c) { return c.role === 'student'; }).map(function (c) {
-      return { code: c.code, name: c.name, school: c.school || '', email: c.email || '', roomId: c.roomId || '', puzzles: own[c.code] || 0, created: c.created };
+      return { code: c.code, name: c.name, school: c.school || '', email: c.email || '', roomId: c.roomId || '', puzzles: own[c.code] || 0, created: c.created, hideName: isHidden_(c) };
     }),
     rooms: rooms, bank: bank
   };
@@ -1756,6 +1758,7 @@ function adminSaveSettings(code, data) {
          : typeof DEFAULT_SETTINGS[k] === 'boolean' ? !!data[k] : String(data[k]);
   });
   PropertiesService.getScriptProperties().setProperty('SETTINGS', JSON.stringify(s));
+  try { CacheService.getScriptCache().remove(ISLAND_CACHE); } catch (e) { } // 名字公開與否馬上生效
   return s;
 }
 
@@ -1837,7 +1840,8 @@ function studentRow_(rows, sc) {
   if (!r) throw new Error('找不到這位學生');
   return r;
 }
-/** 改姓名、學校班級；clearEmail 解除 Google 綁定（換帳號時用）。改名時，他設計的題目署名一起改 */
+/** 改姓名、學校班級；clearEmail 解除 Google 綁定（換帳號時用）。改名時，他設計的題目署名一起改。
+ *  hideName：這位學生的名字不出現在公開的密室島 */
 function adminUpdateStudent(code, sc, data) {
   var a = account_(code);
   needRole_(a, ['admin']);
@@ -1848,7 +1852,9 @@ function adminUpdateStudent(code, sc, data) {
     if (data.name !== undefined && String(data.name).trim()) r.name = String(data.name).trim().slice(0, 20);
     if (data.school !== undefined) r.school = String(data.school).trim().slice(0, 30);
     if (data.clearEmail) r.email = '';
+    if (data.hideName !== undefined) r.hideName = data.hideName ? '是' : '';
     writeRow_('Codes', r._row, r);
+    try { CacheService.getScriptCache().remove(ISLAND_CACHE); } catch (e) { }
     if (r.name !== old) {
       allDocs_('Puzzles').forEach(function (p) {
         if (p.ownerCode === r.code && !p.deleted) { p.author = r.name; putDoc_('Puzzles', p); }
@@ -2275,11 +2281,15 @@ function adminStats(code, roomId) {
 /* ============================================================
  *  密室島：學生密室的公開展示頁（docs/islands.html，不用登入）
  *  只列已發布的學生密室，內容取自發布版本（審核過的），不含答案、提示與題目內容。
- *  名字會公開：密室名稱、組名、組員、各關設計者。遊玩數據不含試玩。
+ *  密室名稱、組名一定公開。學生名字（組員、各關設計者）由後端決定要不要送出：
+ *    - 設定「islandNames」關掉：所有名字都不送，只剩組名。
+ *    - 學生名單勾「不公開名字」（Codes.hideName）：那位學生不列在組員裡，他設計的關卡不署名。
+ *  沒送出去的名字不會出現在回應裡，展示頁上怎麼按都看不到。遊玩數據不含試玩。
  * ============================================================ */
 
 var ISLAND_CACHE = 'islands:v1';
 var ISLAND_THEMES = { island: '小島', jigsaw: '拼圖', planet: '星球', list: '清單' };
+function isHidden_(c) { return c.hideName === '是' || c.hideName === true; }
 
 function islandRooms() {
   var cache = CacheService.getScriptCache();
@@ -2293,6 +2303,16 @@ function islandRooms() {
     (byRoom[p.roomId] = byRoom[p.roomId] || []).push(p);
   });
   var clip = function (t, n) { t = String(t || '').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
+  var showNames = settings_().islandNames !== false;
+  // 不公開名字的學生：用代碼認題目（改過名字、發布版本裡還是舊名字也擋得住），再用名字擋一次
+  var hideCode = {}, hideName = {}, ownerOf = {}, anyHidden = false;
+  if (showNames) {
+    codes_().forEach(function (c) {
+      if (c.role === 'student' && isHidden_(c)) { hideCode[c.code] = true; hideName[String(c.name).trim()] = true; anyHidden = true; }
+    });
+    if (anyHidden) readAll_('Puzzles').forEach(function (p) { ownerOf[p.id] = p.ownerCode; });
+  }
+  var shown = function (name) { return !hideName[String(name || '').trim()]; };
   var out = [];
   rooms.forEach(function (room) {
     var snap;
@@ -2310,8 +2330,11 @@ function islandRooms() {
       group: sr.groupName || room.groupName || '',
       theme: ISLAND_THEMES[themeOf_(sr)] || '小島',
       story: clip(pages[0] || (sr.cover && sr.cover.text) || '', 160),
-      members: membersOfRoom_(room),
-      puzzles: (snap.puzzles || []).map(function (p) { return { title: p.title || '未命名', author: p.author || '' }; }),
+      members: showNames ? membersOfRoom_(room).filter(shown) : [],
+      puzzles: (snap.puzzles || []).map(function (p) {
+        var ok = showNames && !hideCode[ownerOf[p.id]] && shown(p.author);
+        return { title: p.title || '未命名', author: ok ? (p.author || '') : '' };
+      }),
       plays: plays.length,
       escaped: escaped.length,
       bestSec: secs.length ? Math.min.apply(null, secs) : null,
@@ -2320,7 +2343,7 @@ function islandRooms() {
     });
   });
   // 照建立順序（試算表的列序），通常就是第一組、第二組……
-  var res = { campName: settings_().campName, rooms: out, ts: nowStr_() };
+  var res = { campName: settings_().campName, names: showNames, rooms: out, ts: nowStr_() };
   try { cache.put(ISLAND_CACHE, JSON.stringify(res), 300); } catch (e) { }
   return res;
 }

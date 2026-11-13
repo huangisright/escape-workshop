@@ -89,6 +89,65 @@ test('內容取自發布版本；發布或下架後馬上更新', () => {
   assert.equal(env.plain(env.gs.islandRooms()).rooms.length, 0, '下架就從島上消失');
 });
 
+// Google 登入的做法：學生一人一列，分進同一組，各出一題，管理者發布
+function studentRoom(env, groupName, people) {
+  const g = env.plain(env.gs.adminCreateGroups(env.admin, [{ name: groupName }]))[0];
+  const ws = env.plain(env.gs.getWorkspace(g.code));
+  const studs = env.plain(env.gs.adminCreateStudents(env.admin, people.map((x) => ({ name: x.name }))));
+  studs.forEach((st, i) => {
+    env.gs.adminAssignStudent(env.admin, st.code, ws.room.id);
+    const p = env.plain(env.gs.newPuzzle(st.code));
+    H.savePuzzle(env, st.code, p, H.fullPuzzle({ title: people[i].title, answer: 'A' + i }));
+  });
+  H.fillRoomPages(env, g.code, ws.room.id);
+  env.advance(1);
+  const room = env.plain(env.gs.adminRoomAction(env.admin, ws.room.id, 'publish'));
+  return { room, studs };
+}
+
+test('設定關掉公開名字：後端完全不送出組員與設計者，只剩組名', () => {
+  const env = H.load();
+  publishedGroupRoom(env, '第一組', ['王小明', '李小華'], [{ title: '漲潮時刻表', author: '王小明', answer: 'TIDE' }]);
+  assert.equal(env.plain(env.gs.islandRooms()).names, true);
+  env.gs.adminSaveSettings(env.admin, { islandNames: false });
+  const out = env.plain(env.gs.islandRooms()); // 存設定就清快取，馬上生效
+  assert.equal(out.names, false);
+  assert.equal(out.rooms[0].group, '第一組');
+  assert.deepEqual(out.rooms[0].members, []);
+  assert.deepEqual(out.rooms[0].puzzles, [{ title: '漲潮時刻表', author: '' }]);
+  const raw = JSON.stringify(out);
+  assert.ok(!raw.includes('王小明') && !raw.includes('李小華'), '名字不能出現在回應裡');
+  env.gs.adminSaveSettings(env.admin, { islandNames: true });
+  assert.deepEqual(env.plain(env.gs.islandRooms()).rooms[0].members, ['王小明', '李小華']);
+});
+
+test('排除個別學生：不列在組員、他的關卡不署名，其他人照常；改名後也擋得住', () => {
+  const env = H.load();
+  const { studs } = studentRoom(env, '第一組', [{ name: '王小明', title: '漲潮時刻表' }, { name: '李小華', title: '消失的海岸線' }]);
+  let R = env.plain(env.gs.islandRooms()).rooms[0];
+  assert.deepEqual(R.members, ['王小明', '李小華']);
+
+  env.gs.adminUpdateStudent(env.admin, studs[1].code, { hideName: true });
+  let out = env.plain(env.gs.islandRooms());
+  R = out.rooms[0];
+  assert.equal(out.names, true);
+  assert.deepEqual(R.members, ['王小明']);
+  assert.deepEqual(R.puzzles, [{ title: '漲潮時刻表', author: '王小明' }, { title: '消失的海岸線', author: '' }]);
+  assert.ok(!JSON.stringify(out).includes('李小華'));
+  assert.equal(env.plain(env.gs.adminOverview(env.admin)).students.filter((x) => x.code === studs[1].code)[0].hideName, true);
+
+  // 發布版本裡還是舊名字「李小華」，改名後靠代碼認題目，一樣不署名
+  env.gs.adminUpdateStudent(env.admin, studs[1].code, { name: '李華' });
+  out = env.plain(env.gs.islandRooms());
+  assert.ok(!JSON.stringify(out).includes('李小華') && !JSON.stringify(out).includes('李華'));
+
+  // 改其他欄位不會動到這個勾選；取消勾選就恢復
+  env.gs.adminUpdateStudent(env.admin, studs[1].code, { school: '金湖國中' });
+  assert.deepEqual(env.plain(env.gs.islandRooms()).rooms[0].members, ['王小明']);
+  env.gs.adminUpdateStudent(env.admin, studs[1].code, { hideName: false });
+  assert.deepEqual(env.plain(env.gs.islandRooms()).rooms[0].members, ['王小明', '李華']);
+});
+
 test('API 有開放 islandRooms，而且不用代碼', () => {
   const env = H.load();
   assert.ok(env.gs.API_FUNCTIONS.indexOf('islandRooms') >= 0);
@@ -157,4 +216,33 @@ test('展示頁：島排成一圈，切換時選到的島轉到中間；名字�
     await browser.close();
     srv.close();
   }
+});
+
+test('展示頁：後端不送名字時，切換名字的按鈕收起來，頁面上找不到學生名字', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const env = H.load();
+  publishedGroupRoom(env, '第一組', ['王小明'], [{ title: '漲潮時刻表', author: '王小明', answer: 'A' }]);
+  publishedGroupRoom(env, '第二組', ['李小華'], [{ title: '浮冰拼圖', author: '李小華', answer: 'B' }]);
+  env.gs.adminSaveSettings(env.admin, { islandNames: false });
+
+  const srv = await serveDocs();
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await ctx.route('https://script.google.com/**', async (route) => {
+      const req = JSON.parse(route.request().postData() || '{}');
+      const out = { ok: true, result: env.plain(env.gs[req.fn].apply(null, req.args || [])) };
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(out) });
+    });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.goto('http://localhost:' + srv.address().port + '/islands.html');
+    await page.waitForSelector('.isle.on');
+    assert.equal(await page.locator('#namesBtn').isVisible(), false);
+    assert.equal(await page.textContent('.panel h3'), '關卡');
+    assert.match(await page.textContent('.panel .grp'), /第一組/);
+    const body = await page.innerText('.wrap');
+    assert.ok(!body.includes('王小明') && !body.includes('李小華') && !body.includes('組員'));
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); srv.close(); }
 });

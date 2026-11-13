@@ -19,6 +19,7 @@ h1{margin:6px 0;font-family:'Noto Serif TC',serif;font-weight:900;font-size:clam
 .lead{margin:0;font-size:16px;color:#cfdde3}
 .pill-btn{min-height:44px;padding:0 18px;border-radius:999px;border:1px solid #4d7486;background:transparent;color:#eef3f5;font:inherit;font-size:15px;cursor:pointer;display:flex;align-items:center;gap:8px}
 .pill-btn:hover{border-color:#e8b84a}
+.pill-btn[hidden]{display:none}
 .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .stat{background:#133243;border-radius:14px;padding:14px 16px}
 .stat p{margin:0;font-size:13px;color:#b9cdd6}
@@ -114,7 +115,7 @@ h1{margin:6px 0;font-family:'Noto Serif TC',serif;font-weight:900;font-size:clam
 <script>
 (function () {
   var API = window.ER_API;
-  var S = { rooms: [], sel: 0, names: true };
+  var S = { rooms: [], sel: 0, names: true, pub: true }; // pub：後端有沒有送出名字（設定關掉就完全沒有）
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var LANDS = ['#6fa35a', '#8fb6a8', '#9aae5c', '#5f9a6e', '#79a84f', '#6a9f63', '#83a05a', '#5d9480'];
@@ -208,8 +209,8 @@ h1{margin:6px 0;font-family:'Noto Serif TC',serif;font-weight:900;font-size:clam
       '<div><h2>' + esc(R.title) + '</h2>' + (R.group ? '<p class="grp">' + esc(R.group) + '</p>' : '') + '</div>' +
       (R.story ? '<p class="story">' + esc(R.story) + '</p>' : '') +
       '<div class="nums"><div><p>挑戰隊伍</p><b>' + R.plays + '</b></div><div><p>逃脫成功率</p><b>' + rate + '</b></div><div><p>最快紀錄</p><b>' + mmss(R.bestSec) + '</b></div></div>' +
-      '<div><h3>關卡與設計者</h3><ol>' + list + '</ol>' +
-      (S.names ? (R.members.length ? '<p class="note">組員：' + R.members.map(esc).join('、') + '</p>' : '')
+      '<div><h3>' + (S.pub ? '關卡與設計者' : '關卡') + '</h3><ol>' + list + '</ol>' +
+      (!S.pub ? '' : S.names ? (R.members.length ? '<p class="note">組員：' + R.members.map(esc).join('、') + '</p>' : '')
                : '<p class="note">目前只顯示組名，設計者名字已隱藏</p>') + '</div>' +
       (R.playCode ? '<a class="go" href="./?p=' + encodeURIComponent(R.playCode) + '">登島挑戰這間密室' + ICON_R.replace(/22/g, '18') + '</a>' : '');
     pn.hidden = false;
@@ -275,6 +276,8 @@ h1{margin:6px 0;font-family:'Noto Serif TC',serif;font-weight:900;font-size:clam
     .then(function (j) {
       if (!j.ok) throw new Error(j.error);
       S.rooms = (j.result && j.result.rooms) || [];
+      S.pub = !j.result || j.result.names !== false; // 舊版後端沒有這個欄位，當作有送
+      if (!S.pub) { S.names = false; $('namesBtn').hidden = true; }
       stats();
       if (!S.rooms.length) return fail('島嶼還在海底醞釀中：等學生的密室審核發布後，就會一座座浮上來。');
       build();

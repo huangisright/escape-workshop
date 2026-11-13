@@ -1676,15 +1676,16 @@ function adminStudentsHtml(d) {
 
   h += '<div class="card"><h3>學生名單（' + studs.length + '）</h3>';
   if (studs.length) {
-    h += '<div style="overflow-x:auto"><table><tr><th>姓名</th><th>學校班級</th><th>Google 帳號</th><th>個人代碼</th><th>題數</th><th></th></tr>' + studs.map(function (st) {
+    h += '<div style="overflow-x:auto"><table><tr><th>姓名</th><th>學校班級</th><th>Google 帳號</th><th>個人代碼</th><th>題數</th><th>密室島</th><th></th></tr>' + studs.map(function (st) {
       return '<tr><td><input type="text" data-stname="' + esc(st.code) + '" value="' + esc(st.name) + '" style="min-width:90px"></td><td><input type="text" data-stschool="' + esc(st.code) + '" value="' + esc(st.school) + '" style="min-width:110px"></td>' +
         '<td style="font-size:13px;word-break:break-all">' + (st.email ? esc(st.email) : '<span class="muted">未綁定</span>') + '</td><td class="big" style="font-size:16px">' + esc(st.code) + '</td><td>' + st.puzzles + '</td>' +
+        '<td><label style="display:flex;gap:6px;align-items:center;white-space:nowrap;font-size:14px"><input type="checkbox" data-act="hideStudentName" data-code="' + esc(st.code) + '"' + (st.hideName ? ' checked' : '') + '>不公開名字</label></td>' +
         '<td style="white-space:nowrap"><button class="btn ghost sm" data-act="saveStudent" data-code="' + esc(st.code) + '">儲存</button> ' +
         (st.email ? '<button class="btn ghost sm" data-act="unbindStudent" data-code="' + esc(st.code) + '">解除綁定</button> ' : '') +
         '<button class="btn danger sm" data-act="deleteStudent" data-code="' + esc(st.code) + '"' + (st.puzzles ? ' disabled title="有題目的學生不能刪除"' : '') + '>刪除</button></td></tr>';
     }).join('') + '</table></div>';
   } else h += '<p class="muted">還沒有學生加入。</p>';
-  h += '<p class="help">改姓名時，他設計的題目署名會一起改。「解除綁定」用在學生換 Google 帳號：他下次用新帳號登入時輸入個人代碼就能接回原本的題目。</p>';
+  h += '<p class="help">勾「不公開名字」：這位學生不會列在密室島的組員裡，他設計的關卡也不署名（勾了馬上生效，不用按儲存）。改姓名時，他設計的題目署名會一起改。「解除綁定」用在學生換 Google 帳號：他下次用新帳號登入時輸入個人代碼就能接回原本的題目。</p>';
   h += '<label class="f">沒辦法用 Google 登入的學生：老師直接建個人代碼（一行一位，格式：姓名：學校班級）</label><textarea id="newStudents" placeholder="王小明：金城國中 701&#10;陳小華：金湖國中 702"></textarea>' +
     '<div class="btns"><button class="btn" data-act="createStudents">建立個人代碼</button><button class="btn ghost" data-act="printStudentCodes"' + (studs.length ? '' : ' disabled') + '>列印個人代碼 QR</button></div></div>';
   return h;
@@ -1712,7 +1713,8 @@ var SETTING_FIELDS = [
   ['maxPuzzleMinutes', '每題預估時間上限（分鐘，超過亮黃燈）', 'number'], ['maxHints', '每題提示層數上限', 'number'],
   ['minPuzzlesPerMember', '每人至少幾題', 'number'], ['maxPuzzlesPerMember', '每人最多幾題', 'number'],
   ['answerMaxLen', '答案字數上限（0 = 不限）', 'number'], ['wrongCooldownSec', '答錯後等幾秒才能再答', 'number'],
-  ['defaultHintDelaySec', '新增提示時預設幾秒後可看', 'number'], ['requireDigitalAndPhysical', '每組數位題、實體題至少各一題', 'bool']
+  ['defaultHintDelaySec', '新增提示時預設幾秒後可看', 'number'], ['requireDigitalAndPhysical', '每組數位題、實體題至少各一題', 'bool'],
+  ['islandNames', '密室島公開學生名字（組員、各關設計者）。關掉就只公開組名；只想排除個別學生，到「學生」分頁勾「不公開名字」', 'bool']
 ];
 function adminSettingsHtml(s) {
   return '<div class="card"><h3>營隊規則</h3><p class="help">規則超標只會亮黃燈提醒，不會擋住學生。</p>' + SETTING_FIELDS.map(function (f) {
@@ -2749,6 +2751,13 @@ var ACTIONS = {
     var c = el.getAttribute('data-code');
     api('adminUpdateStudent', S.code, c, { name: document.querySelector('[data-stname="' + c + '"]').value, school: document.querySelector('[data-stschool="' + c + '"]').value })
       .then(function () { toast('已儲存'); showAdmin('students'); }).catch(fail);
+  },
+  hideStudentName: function (el) {
+    var c = el.getAttribute('data-code'), on = el.checked;
+    api('adminUpdateStudent', S.code, c, { hideName: on }).then(function () {
+      (S.admin.data.students || []).forEach(function (x) { if (x.code === c) x.hideName = on; });
+      toast(on ? '密室島不會出現他的名字' : '密室島會公開他的名字');
+    }).catch(function (e) { el.checked = !on; fail(e); });
   },
   unbindStudent: function (el) {
     var c = el.getAttribute('data-code'), st = S.admin.data.students.filter(function (x) { return x.code === c; })[0];

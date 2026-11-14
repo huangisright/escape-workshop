@@ -154,6 +154,10 @@ body.playing{background:#12161b;color:#eef0f2}
 .pcard audio{width:100%;margin:10px 0}
 .pcard iframe{width:100%;border:0;border-radius:10px;background:#fff;margin:10px 0}
 .pcard .cap{color:#aab3bd;font-size:15px}
+.propfile{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}.propfile .thumb{max-height:70px;margin:0}.propfile .nm{font-size:14px;word-break:break-all}
+.pdfbadge{display:inline-block;background:#c0392b;color:#fff;font-weight:700;font-size:12px;padding:6px 8px;border-radius:6px}
+.pblk.new{animation:blkin 1.6s ease-out}
+@keyframes blkin{0%{opacity:0;box-shadow:0 0 0 3px #f3c969;border-radius:10px}40%{opacity:1;box-shadow:0 0 0 3px #f3c969;border-radius:10px}100%{box-shadow:0 0 0 0 transparent}}
 .pcard a{color:#9cc9ff}
 .pin{width:100%;font-size:24px;padding:14px;border-radius:12px;border:1px solid #3a4552;background:#0e1216;color:#fff;letter-spacing:.05em}
 .pbtn{font-size:19px;padding:13px 22px;border-radius:12px;border:0;background:#f3c969;color:#1b1b1b;cursor:pointer;font-weight:700;margin-top:10px}
@@ -818,6 +822,21 @@ function fileData(fileId) {
   if (S.fileCache[fileId]) return Promise.resolve(S.fileCache[fileId]);
   return api('getFileData', S.code, fileId).then(function (d) { S.fileCache[fileId] = d; return d; });
 }
+/** 把雲端的檔案存到這台電腦（列印檔用） */
+function saveFileAs(fileId, name) {
+  return fileData(fileId).then(function (d) {
+    if (!d.dataUrl) throw new Error('這個檔案沒辦法下載');
+    // 轉成 blob 網址再下載：data: 網址的檔名有中文時，瀏覽器常常不照 download 屬性命名
+    var m = /^data:([^;,]*)(;base64)?,/.exec(d.dataUrl), raw = d.dataUrl.substring(d.dataUrl.indexOf(',') + 1);
+    var bin = m && m[2] ? atob(raw) : decodeURIComponent(raw), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([bytes], { type: (m && m[1]) || 'application/octet-stream' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = name || 'file';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  });
+}
 function hydrateFiles(root) {
   (root || app).querySelectorAll('[data-file]').forEach(function (el) {
     var id = el.getAttribute('data-file');
@@ -1325,11 +1344,12 @@ function renderPuzzleEditor() {
   h += '</div>';
 
   // 6 道具
-  h += '<div class="card"><h3><span class="no">6</span>道具與佈置</h3><p class="help">老師會把它整理成各組的材料清單。</p>';
+  h += '<div class="card"><h3><span class="no">6</span>道具與佈置</h3><p class="help">老師會把它整理成各組的材料清單。<br>需要老師幫忙<b>印出來</b>的圖或文件，在道具旁邊上傳 PNG、JPG 或 PDF（上限 8 MB），老師會統一列印。列印檔只有老師和同組看得到，闖關的玩家看不到。</p>';
   (p.props || []).forEach(function (x, i) {
-    h += '<div class="row" style="margin-bottom:8px"><div><label class="f">道具</label><input type="text" data-f="props.' + i + '.item" value="' + esc(x.item) + '"' + dis + '></div>' +
+    h += '<div class="sub" style="margin-bottom:8px"><div class="row"><div><label class="f">道具</label><input type="text" data-f="props.' + i + '.item" value="' + esc(x.item) + '"' + dis + '></div>' +
       '<div><label class="f">擺放位置</label><input type="text" data-f="props.' + i + '.place" value="' + esc(x.place) + '"' + dis + '></div>' +
-      (ro ? '' : '<div style="flex:none;min-width:0"><button class="iconbtn" data-act="delRow" data-arr="props" data-i="' + i + '" aria-label="刪除道具">✕</button></div>') + '</div>';
+      (ro ? '' : '<div style="flex:none;min-width:0"><button class="iconbtn" data-act="delRow" data-arr="props" data-i="' + i + '" aria-label="刪除道具">✕</button></div>') + '</div>' +
+      propFileHtml(x, i, ro) + '</div>';
   });
   if (!ro) h += '<button class="btn ghost sm" data-act="addRow" data-arr="props">＋ 新增道具</button>';
   h += '</div>';
@@ -1374,7 +1394,41 @@ function blockEditorHtml(b, i, ro) {
     h += '<div class="row"><div><label class="f">網址</label><input type="url" data-f="blocks.' + i + '.url" value="' + esc(b.url) + '" placeholder="https://"' + dis + '></div>' +
       '<div><label class="f">按鈕文字</label><input type="text" data-f="blocks.' + i + '.label" value="' + esc(b.label) + '"' + dis + '></div></div>';
   }
-  return h + '</div>';
+  return h + revealPickerHtml(b, i, ro) + '</div>';
+}
+/** 道具的列印檔（PNG／JPG／PDF），只給老師列印用 */
+function propFileHtml(x, i, ro) {
+  var h = '';
+  if (x.fileId) {
+    var isImg = /^image\//.test(x.fileMime || '');
+    h += '<div class="propfile">' + (isImg ? '<img class="thumb" data-file="' + esc(x.fileId) + '" alt="列印檔">' : '<span class="pdfbadge">PDF</span>') +
+      '<span class="nm">🖨 ' + esc(x.fileName || '列印檔') + '</span>' +
+      '<button class="iconbtn" data-act="downloadFile" data-fid="' + esc(x.fileId) + '" data-name="' + esc(x.fileName || '列印檔') + '">看檔案</button>' +
+      (ro ? '' : '<button class="iconbtn" data-act="clearPropFile" data-i="' + i + '">移除</button>') + '</div>';
+  }
+  if (!ro) h += '<label class="f" style="margin-top:6px">' + (x.fileId ? '換一個列印檔' : '要印出來的檔案（選填）') + '</label>' +
+    '<input type="file" accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf" data-upload="propfile" data-i="' + i + '">';
+  return h;
+}
+/** 區塊什麼時候出現：一開始，或第幾步的中途答案答對後 */
+function revealPickerHtml(b, i, ro) {
+  var steps = S.puzzle.steps || [], k = Math.floor(Number(b.after) || 0);
+  if (!steps.length && !k) return '';
+  var opts = '<option value="0">一開始就出現</option>' + steps.map(function (st, j) {
+    var cp = String(st.checkpoint || '').trim();
+    return '<option value="' + (j + 1) + '"' + (k === j + 1 ? ' selected' : '') + '>第 ' + (j + 1) + ' 步答對後才出現' + (cp ? '' : '（這一步還沒填中途答案）') + '</option>';
+  }).join('');
+  if (k > steps.length) opts += '<option value="' + k + '" selected>第 ' + k + ' 步答對後（這一步已刪除）</option>';
+  return '<label class="f">什麼時候出現</label><select data-f="blocks.' + i + '.after" data-num="1"' + (ro ? ' disabled' : '') + '>' + opts + '</select>' +
+    (k ? '<p class="help" style="margin:4px 0 0">玩家要先在答案欄輸入第 ' + k + ' 步的中途答案，答對了這個區塊才會出現。</p>' : '');
+}
+/** 玩家端：區塊要先過幾道關卡才出現（跟後端 blockGate_ 一樣的算法） */
+function blockGate(b, steps) {
+  var k = Math.floor(Number(b && b.after) || 0);
+  if (k <= 0) return 0;
+  var n = 0;
+  (steps || []).slice(0, k).forEach(function (st) { if (String(st.checkpoint || '').trim()) n++; });
+  return n;
 }
 
 /* 玩家角度預覽（只在本機判斷答案，不會記錄） */
@@ -1388,7 +1442,7 @@ function previewPuzzle(p) {
     (p.hints || []).filter(function (x) { return String(x.text || '').trim() || x.imageId; }).map(function (x, i) { return '<div class="phint">提示 ' + (i + 1) + '（開始後 ' + (x.delaySec || 0) + ' 秒）：' + esc(x.text) + (x.imageId ? '<img data-file="' + esc(x.imageId) + '" alt="提示圖片">' : '') + '</div>'; }).join('') + '</div></div>');
   var setGate = function () { d.querySelector('#pvGate').textContent = gates.length > 1 ? '第 ' + (g + 1) + ' / ' + gates.length + ' 步：' + gates[g].label : '答案'; };
   setGate();
-  renderPlayBlocks(d.querySelector('#pvBlocks'), (p.blocks || []).map(function (b) { return b; }), true);
+  renderPlayBlocks(d.querySelector('#pvBlocks'), (p.blocks || []).map(function (b) { return b; }), true, p.steps);
   d.querySelectorAll('.phint img[data-file]').forEach(function (el) { hydrateFiles(el.parentNode); });
   var coolSec = Number(((S.me || {}).settings || {}).wrongCooldownSec) || 0, coolAt = 0;
   var cool = function () { // 答錯冷卻：跟正式遊玩一樣，等幾秒才能再答
@@ -1402,7 +1456,12 @@ function previewPuzzle(p) {
     if (Date.now() < coolAt) return;
     var v = d.querySelector('#pvIn').value, m = d.querySelector('#pvMsg');
     if (norm(v) && gates[g].answers.some(function (a) { return norm(a) === norm(v); })) {
-      if (g < gates.length - 1) { g++; setGate(); m.className = 'pmsg good'; m.textContent = '正確！繼續下一步'; d.querySelector('#pvIn').value = ''; }
+      if (g < gates.length - 1) {
+        g++; setGate(); d.querySelector('#pvIn').value = '';
+        var nb = gateBlocks(d.querySelector('#pvBlocks'), g);
+        m.className = 'pmsg good'; m.textContent = nb ? '正確！新的線索出現了' : '正確！繼續下一步';
+        if (nb && nb.scrollIntoView) nb.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       else { m.className = 'pmsg good'; m.textContent = '答對了！這題完成'; }
     } else if (coolSec > 0) { coolAt = Date.now() + coolSec * 1000; cool(); }
     else { m.className = 'pmsg bad'; m.textContent = '答案不對'; }
@@ -1863,18 +1922,62 @@ function drawQrs() {
     try { new QRCode(el, { text: t, width: 140, height: 140 }); } catch (e) { el.textContent = t; }
   });
 }
+/** 一個密室的所有列印檔，檔名排成「組名-第幾題-道具.副檔名」，下載後照順序好整理 */
+function printFilesOf(r) {
+  var out = [];
+  r.puzzles.forEach(function (p) {
+    (p.props || []).forEach(function (x) {
+      if (!x.fileId) return;
+      var ext = (String(x.fileName || '').match(/\.[A-Za-z0-9]{1,5}$/) || [''])[0].toLowerCase() ||
+        (x.fileMime === 'application/pdf' ? '.pdf' : x.fileMime === 'image/png' ? '.png' : '.jpg');
+      var label = String(x.item || '').trim() || String(x.fileName || '').replace(/\.[A-Za-z0-9]{1,5}$/, '') || '列印檔';
+      var name = ((r.groupName || r.title || '') + '-第' + p.no + '題-' + label + ext).replace(/[\\\/:*?"<>|]/g, '_');
+      out.push({ fileId: x.fileId, name: name, label: x.fileName || label });
+    });
+  });
+  return out;
+}
+function downloadPrints(key) {
+  var list = (S.prints || {})[key] || [];
+  if (!list.length) return;
+  var i = 0, bad = 0;
+  netBusy(true);
+  var next = function () {
+    if (i >= list.length) { netBusy(false); toast(bad ? '下載完成，' + bad + ' 個檔案讀取失敗' : '已下載 ' + list.length + ' 個列印檔', bad ? 'err' : ''); return; }
+    var f = list[i++];
+    toast('下載中 ' + i + ' / ' + list.length + '…');
+    saveFileAs(f.fileId, f.name).catch(function () { bad++; }).then(function () { setTimeout(next, 400); });
+  };
+  next();
+}
 function showMaterials() {
   app.innerHTML = topbar('材料清單', { back: 'toAdmin' }) + '<div class="wrap"><p class="muted">載入中…</p></div>';
   api('adminMaterials', S.code).then(function (rooms) {
-    var h = topbar('材料清單', { back: 'toAdmin' }) + '<div class="wrap"><div class="btns noprint" style="margin-bottom:12px"><button class="btn" data-act="print">列印</button></div>';
+    S.prints = {};
+    var all = [];
     rooms.forEach(function (r) {
-      h += '<div class="card"><h3>' + esc(r.groupName || r.title) + (r.location ? '　📍' + esc(r.location) : '') + '</h3><p class="muted" style="margin:0 0 8px">' + esc(r.title) + '</p><table><tr><th>#</th><th>題目</th><th>負責</th><th>類型</th><th>道具</th><th>擺放位置</th><th>✓</th></tr>';
+      var list = printFilesOf(r);
+      S.prints[r.id] = list;
+      all = all.concat(list);
+    });
+    S.prints._all = all;
+    var h = topbar('材料清單', { back: 'toAdmin' }) + '<div class="wrap"><div class="btns noprint" style="margin-bottom:12px"><button class="btn" data-act="print">列印清單</button>' +
+      (all.length ? '<button class="btn ghost" data-act="downloadPrints" data-id="_all">⬇ 下載全部列印檔（' + all.length + ' 個）</button>' : '') + '</div>' +
+      (all.length ? '<p class="help noprint">列印檔是學生在謎題卡「道具與佈置」上傳的 PNG、JPG、PDF，下載後再統一列印。一次下載很多個時，瀏覽器可能會問要不要允許下載多個檔案，請選允許。</p>' : '');
+    rooms.forEach(function (r) {
+      var n = S.prints[r.id].length;
+      h += '<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><h3 style="margin-bottom:2px">' + esc(r.groupName || r.title) + (r.location ? '　📍' + esc(r.location) : '') + '</h3><p class="muted" style="margin:0 0 8px">' + esc(r.title) + '</p></div>' +
+        (n ? '<button class="btn ghost sm noprint" data-act="downloadPrints" data-id="' + esc(r.id) + '">⬇ 這組的列印檔（' + n + '）</button>' : '') + '</div>' +
+        '<table><tr><th>#</th><th>題目</th><th>負責</th><th>類型</th><th>道具</th><th>擺放位置</th><th>列印檔</th><th>✓</th></tr>';
       r.puzzles.forEach(function (p) {
-        var props = p.props.filter(function (x) { return String(x.item || '').trim(); });
+        var props = p.props.filter(function (x) { return String(x.item || '').trim() || x.fileId; });
         if (!props.length) props = [{ item: '—', place: '' }];
         props.forEach(function (x, k) {
+          var pf = x.fileId ? S.prints[r.id].filter(function (f) { return f.fileId === x.fileId; })[0] : null;
           h += '<tr>' + (k === 0 ? '<td rowspan="' + props.length + '">' + p.no + '</td><td rowspan="' + props.length + '">' + esc(p.title) + '</td><td rowspan="' + props.length + '">' + esc(p.author) + '</td><td rowspan="' + props.length + '">' + kindLabel(p.kind) + '</td>' : '') +
-            '<td>' + esc(x.item) + '</td><td>' + esc(x.place) + '</td><td>☐</td></tr>';
+            '<td>' + esc(x.item || '（列印檔）') + '</td><td>' + esc(x.place) + '</td><td>' +
+            (pf ? '🖨 ' + esc(pf.label) + ' <button class="iconbtn noprint" data-act="downloadFile" data-fid="' + esc(pf.fileId) + '" data-name="' + esc(pf.name) + '">下載</button>' : '') +
+            '</td><td>☐</td></tr>';
         });
       });
       h += '</table></div>';
@@ -2162,6 +2265,9 @@ function renderPlay(msg, good) {
     P.renderedPid = st.puzzleId;
     window.scrollTo(0, 0);
   }
+  // 答對中途答案後才出現的區塊
+  var newBlk = gateBlocks(document.getElementById('blocks'), Number(st.gate) || 0);
+  if (newBlk && good) msg = '正確！新的線索出現了';
   document.getElementById('barIdx').textContent = playLabel(st);
   // 關卡位置：有填才出現；本題地點在題目標題下面，完整的表用按鈕打開
   document.getElementById('pplace').innerHTML = st.place ? '<span class="pplace">📍 ' + esc(st.place) + '</span>' : '';
@@ -2187,17 +2293,14 @@ function renderPlay(msg, good) {
   loadHintImages(st);
   var inp = document.getElementById('ans');
   inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendAnswer(); });
+  if (newBlk && good && newBlk.scrollIntoView) newBlk.scrollIntoView({ behavior: 'smooth', block: 'center' });
   tickPlay();
   S.timers.push(setInterval(tickPlay, 500));
 }
-function renderPlayBlocks(el, blocks, local) {
+function renderPlayBlocks(el, blocks, local, steps) {
   el.innerHTML = (blocks || []).map(function (b, i) {
-    if (b.type === 'text') return '<div class="txt">' + esc(b.text) + '</div>';
-    if (b.type === 'image') return '<img ' + (local ? 'data-file="' + esc(b.fileId) + '"' : 'src="' + b.src + '"') + ' alt="">' + (b.caption ? '<div class="cap">' + esc(b.caption) + '</div>' : '');
-    if (b.type === 'audio') return '<audio controls ' + (local ? 'data-file="' + esc(b.fileId) + '"' : 'src="' + b.src + '"') + '></audio>' + (b.caption ? '<div class="cap">' + esc(b.caption) + '</div>' : '');
-    if (b.type === 'link') return '<p><a target="_blank" rel="noopener" href="' + esc(b.url) + '">🔗 ' + esc(b.label || b.url) + '</a></p>';
-    if (b.type === 'html') return '<iframe sandbox="allow-scripts allow-popups allow-forms" data-hi="' + i + '" style="height:' + (Number(b.height) || 520) + 'px"></iframe>';
-    return '';
+    var g = local ? blockGate(b, steps) : Number(b.after) || 0, inner = playBlockHtml(b, i, local);
+    return g > 0 ? '<div class="pblk" data-after="' + g + '" hidden>' + inner + '</div>' : inner;
   }).join('');
   el.querySelectorAll('iframe[data-hi]').forEach(function (f) {
     var b = blocks[Number(f.getAttribute('data-hi'))];
@@ -2205,6 +2308,25 @@ function renderPlayBlocks(el, blocks, local) {
     if (b.fileId) fileData(b.fileId).then(function (d) { f.srcdoc = d.text || ''; });
   });
   if (local) hydrateFiles(el);
+}
+/** 已經過了幾道關卡：把可以出現的區塊打開，回傳這次新打開的第一個 */
+function gateBlocks(el, gate) {
+  var first = null;
+  if (!el) return null;
+  el.querySelectorAll('.pblk[data-after]').forEach(function (d) {
+    var open = gate >= Number(d.getAttribute('data-after'));
+    if (open && d.hidden) { d.hidden = false; d.classList.add('new'); if (!first) first = d; }
+    else if (!open) d.hidden = true;
+  });
+  return first;
+}
+function playBlockHtml(b, i, local) {
+  if (b.type === 'text') return '<div class="txt">' + esc(b.text) + '</div>';
+  if (b.type === 'image') return '<img ' + (local ? 'data-file="' + esc(b.fileId) + '"' : 'src="' + b.src + '"') + ' alt="">' + (b.caption ? '<div class="cap">' + esc(b.caption) + '</div>' : '');
+  if (b.type === 'audio') return '<audio controls ' + (local ? 'data-file="' + esc(b.fileId) + '"' : 'src="' + b.src + '"') + '></audio>' + (b.caption ? '<div class="cap">' + esc(b.caption) + '</div>' : '');
+  if (b.type === 'link') return '<p><a target="_blank" rel="noopener" href="' + esc(b.url) + '">🔗 ' + esc(b.label || b.url) + '</a></p>';
+  if (b.type === 'html') return '<iframe sandbox="allow-scripts allow-popups allow-forms" data-hi="' + i + '" style="height:' + (Number(b.height) || 520) + 'px"></iframe>';
+  return '';
 }
 function tickPlay() {
   var P = S.play;
@@ -2391,8 +2513,9 @@ app.addEventListener('change', function (e) {
     return;
   }
   if (t.tagName === 'SELECT' && t.getAttribute('data-f') && S.saver) {
-    setPath(S.target === 'room' ? S.room : S.puzzle, t.getAttribute('data-f'), t.value);
+    setPath(S.target === 'room' ? S.room : S.puzzle, t.getAttribute('data-f'), t.getAttribute('data-num') ? Number(t.value) : t.value);
     S.saver.touch();
+    if (/^blocks\.\d+\.after$/.test(t.getAttribute('data-f'))) { renderPuzzleEditor(); return; }
     if (S.target === 'room' && t.getAttribute('data-f') === 'mode') renderRoomEditor();
     return;
   }
@@ -2414,6 +2537,25 @@ app.addEventListener('change', function (e) {
       if (!r) return;
       b.fileId = r.fileId;
       if (r.fileName) b.fileName = r.fileName;
+      toast('上傳完成');
+      S.saver.touch();
+      renderPuzzleEditor();
+    }).catch(fail);
+  }
+  if (up === 'propfile') {
+    var pi = Number(t.getAttribute('data-i')), pp = S.puzzle;
+    var pmime = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : /\.png$/i.test(file.name) ? 'image/png' : /\.jpe?g$/i.test(file.name) ? 'image/jpeg' : '');
+    if (!/^(image\/png|image\/jpeg|application\/pdf)$/.test(pmime)) { t.value = ''; return toast('列印檔只能是 PNG、JPG 或 PDF', 'err'); }
+    if (file.size > 8 * 1024 * 1024) { t.value = ''; return toast('檔案超過 8 MB，請先壓縮', 'err'); }
+    var pf = file;
+    try { if (!file.type) pf = new File([file], file.name, { type: pmime }); } catch (e) { }
+    var pitem = String((pp.props[pi] || {}).item || '').trim();
+    // 用原檔上傳、不壓縮，列印才清楚
+    uploadMedia(pf, 'file', { roomId: pp.roomId, puzzleId: pp.id, label: '列印檔' + (pitem ? '-' + pitem : '') }).then(function (r) {
+      if (!pp.props[pi]) return;
+      pp.props[pi].fileId = r.fileId;
+      pp.props[pi].fileName = file.name;
+      pp.props[pi].fileMime = pmime;
       toast('上傳完成');
       S.saver.touch();
       renderPuzzleEditor();
@@ -2513,7 +2655,13 @@ var ACTIONS = {
   },
   delRow: function (el) {
     var arr = el.getAttribute('data-arr'), i = Number(el.getAttribute('data-i'));
-    S.puzzle[arr].splice(i, 1); S.saver.touch(); renderPuzzleEditor();
+    S.puzzle[arr].splice(i, 1);
+    // 刪掉一步：設在這一步之後出現的區塊改成一開始就出現，後面的步驟號碼往前補
+    if (arr === 'steps') (S.puzzle.blocks || []).forEach(function (b) {
+      var k = Math.floor(Number(b.after) || 0);
+      if (k === i + 1) b.after = 0; else if (k > i + 1) b.after = k - 1;
+    });
+    S.saver.touch(); renderPuzzleEditor();
   },
   addBlock: function (el) {
     var t = el.getAttribute('data-t'), b = { type: t };
@@ -2539,6 +2687,9 @@ var ACTIONS = {
   previewById: function (el, id) { previewPuzzle(S.viewPuzzles.filter(function (p) { return p.id === id; })[0]); },
   addStory: function () { S.room.story = S.room.story || []; S.room.story.push({ text: '', imageId: '' }); S.saver.touch(); renderRoomEditor(); },
   delStory: function (el) { S.room.story.splice(Number(el.getAttribute('data-i')), 1); S.saver.touch(); renderRoomEditor(); },
+  clearPropFile: function (el) { var x = S.puzzle.props[Number(el.getAttribute('data-i'))]; if (x) { x.fileId = ''; x.fileName = ''; x.fileMime = ''; } S.saver.touch(); renderPuzzleEditor(); },
+  downloadFile: function (el) { saveFileAs(el.getAttribute('data-fid'), el.getAttribute('data-name')).catch(fail); },
+  downloadPrints: function (el) { downloadPrints(el.getAttribute('data-id')); },
   clearHintImg: function (el) { var x = S.puzzle.hints[Number(el.getAttribute('data-i'))]; if (x) x.imageId = ''; S.saver.touch(); renderPuzzleEditor(); },
   clearImg: function (el) { setPath(S.room, el.getAttribute('data-path'), ''); S.saver.touch(); renderRoomEditor(); },
   testPlay: function () {

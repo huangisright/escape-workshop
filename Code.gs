@@ -888,7 +888,15 @@ function checkPuzzle_(p, s, kind, deep) {
       chk_(c, 'err', '第 ' + (i + 1) + ' 個內容區塊的檔案還沒上傳');
     if (b.type === 'text' && !String(b.text || '').trim()) chk_(c, 'warn', '第 ' + (i + 1) + ' 個文字區塊是空的');
     if (b.type === 'link' && !/^https?:\/\//.test(String(b.url || ''))) chk_(c, 'err', '第 ' + (i + 1) + ' 個連結格式不正確');
+    var k = Math.floor(Number(b.after) || 0);
+    if (k > 0) {
+      var stk = (p.steps || [])[k - 1];
+      if (!stk) chk_(c, 'err', '第 ' + (i + 1) + ' 個內容區塊設定在第 ' + k + ' 步答對後出現，但沒有第 ' + k + ' 步');
+      else if (!String(stk.checkpoint || '').trim()) chk_(c, 'err', '第 ' + (i + 1) + ' 個內容區塊設定在第 ' + k + ' 步答對後出現，但第 ' + k + ' 步還沒填中途答案');
+    }
   });
+  if (blocks.length && blocks.every(function (b) { return blockGate_(b, p.steps) > 0; }))
+    chk_(c, 'err', '所有內容區塊都設成答對後才出現，玩家一開始會看不到題目');
   if (p.kind === 'physical' && !blocks.length) { /* 已提示 */ }
 
   var answers = splitAnswers_(p.answer);
@@ -1476,23 +1484,40 @@ function stateOf_(r, havePuzzleId) {
     ? Math.max(0, (Number(visibleHints[r.st.hints].delaySec) || 0) - since) : -1;
   out.cooldownSec = Math.max(0, Math.ceil((r.st.cooldownUntil - nowMs_()) / 1000));
   out.canSkip = (ph === 'main' && out.skipMin > 0) || ph === 'vault';
-  if (havePuzzleId !== p.id) out.blocks = renderBlocks_(p.blocks || []);
+  if (havePuzzleId !== p.id) out.blocks = renderBlocks_(p.blocks || [], p.steps);
   return out;
 }
 
-function renderBlocks_(blocks) {
+/**
+ * 區塊什麼時候出現：b.after = 第幾步（從 1 算）的中途答案答對後才出現，0 或沒填就是一開始就出現。
+ * 換算成「要先過幾道關卡」：數前 after 步裡有幾步填了中途答案。
+ */
+function blockGate_(b, steps) {
+  var k = Math.floor(Number(b && b.after) || 0);
+  if (k <= 0) return 0;
+  var n = 0;
+  (steps || []).slice(0, k).forEach(function (st) { if (String(st.checkpoint || '').trim()) n++; });
+  return n;
+}
+
+function renderBlocks_(blocks, steps) {
   return blocks.map(function (b) {
-    try {
-      if (b.type === 'text') return { type: 'text', text: b.text || '' };
-      if (b.type === 'link') return { type: 'link', url: b.url || '', label: b.label || b.url || '' };
-      if (b.type === 'image') return { type: 'image', src: fileData_(b.fileId).dataUrl, caption: b.caption || '' };
-      if (b.type === 'audio') return { type: 'audio', src: fileData_(b.fileId).dataUrl, caption: b.caption || '' };
-      if (b.type === 'html') return { type: 'html', html: fileData_(b.fileId, 'text/html').text, height: b.height || 520 };
-    } catch (e) {
-      return { type: 'text', text: '（這個區塊的檔案讀取失敗）' };
-    }
-    return { type: 'text', text: '' };
+    var o = renderBlock_(b), g = blockGate_(b, steps);
+    if (g > 0) o.after = g;
+    return o;
   });
+}
+function renderBlock_(b) {
+  try {
+    if (b.type === 'text') return { type: 'text', text: b.text || '' };
+    if (b.type === 'link') return { type: 'link', url: b.url || '', label: b.label || b.url || '' };
+    if (b.type === 'image') return { type: 'image', src: fileData_(b.fileId).dataUrl, caption: b.caption || '' };
+    if (b.type === 'audio') return { type: 'audio', src: fileData_(b.fileId).dataUrl, caption: b.caption || '' };
+    if (b.type === 'html') return { type: 'html', html: fileData_(b.fileId, 'text/html').text, height: b.height || 520 };
+  } catch (e) {
+    return { type: 'text', text: '（這個區塊的檔案讀取失敗）' };
+  }
+  return { type: 'text', text: '' };
 }
 
 function playAnswer(playId, answer) {
@@ -1645,7 +1670,7 @@ function playBundle(playId) {
     puzzles: snap.puzzles.map(function (p) {
       return {
         id: p.id, title: p.title, author: p.author || '', place: places[p.id] || '',
-        blocks: renderBlocks_(p.blocks || []),
+        blocks: renderBlocks_(p.blocks || [], p.steps),
         gates: gates_(p).map(function (g) {
           return { label: g.label, hashes: g.answers.map(norm_).filter(function (x) { return x; }).map(function (x) { return ansHash_(salt, x); }) };
         }),
@@ -2379,7 +2404,7 @@ function adminExport(code, roomId, mode) {
       fail: withRoom ? mediaPage_(room.fail) : { text: '時間到' },
       puzzles: ps.map(function (p) {
         return {
-          title: p.title, author: p.author, blocks: renderBlocks_(p.blocks || []),
+          title: p.title, author: p.author, blocks: renderBlocks_(p.blocks || [], p.steps),
           hints: hintsOf_(p).map(function (h) {
             var o = { text: String(h.text || ''), delaySec: Number(h.delaySec) || 0 };
             if (h.imageId) { try { o.src = fileData_(h.imageId).dataUrl; } catch (e) { } }
@@ -2456,7 +2481,7 @@ var OFFLINE_JS = [
   'function fmt(s){return Math.floor(s/60)+":"+("0"+s%60).slice(-2)}',
   'function tick(){var e=document.getElementById("tm");if(e)e.textContent=fmt(left());if(left()<=0&&!S.done){S.done=true;clearInterval(S.timer);page(DATA.fail,"","")}hintBtn()}',
   'function show(){var p=DATA.puzzles[S.i],g=p.gates[S.g],h="<div class=bar><span>第 "+(S.i+1)+" / "+DATA.puzzles.length+" 題</span>"+(DATA.timeLimitSec?"<span class=timer id=tm>"+fmt(left())+"</span>":"")+"</div><div class=card><h2>"+esc(p.title)+"</h2>";',
-  'p.blocks.forEach(function(b){if(b.type==="text")h+="<div class=txt>"+esc(b.text)+"</div>";else if(b.type==="image")h+="<img src=\'"+b.src+"\'>"+(b.caption?"<div>"+esc(b.caption)+"</div>":"");else if(b.type==="audio")h+="<audio controls src=\'"+b.src+"\'></audio>";else if(b.type==="link")h+="<p><a target=_blank href=\'"+esc(b.url)+"\'>"+esc(b.label)+"</a></p>";else if(b.type==="html")h+="<iframe sandbox=\'allow-scripts allow-popups allow-forms\' style=\'height:"+(b.height||520)+"px\' data-i=\'"+p.blocks.indexOf(b)+"\'></iframe>"});',
+  'p.blocks.forEach(function(b){if((b.after||0)>S.g)return;if(b.type==="text")h+="<div class=txt>"+esc(b.text)+"</div>";else if(b.type==="image")h+="<img src=\'"+b.src+"\'>"+(b.caption?"<div>"+esc(b.caption)+"</div>":"");else if(b.type==="audio")h+="<audio controls src=\'"+b.src+"\'></audio>";else if(b.type==="link")h+="<p><a target=_blank href=\'"+esc(b.url)+"\'>"+esc(b.label)+"</a></p>";else if(b.type==="html")h+="<iframe sandbox=\'allow-scripts allow-popups allow-forms\' style=\'height:"+(b.height||520)+"px\' data-i=\'"+p.blocks.indexOf(b)+"\'></iframe>"});',
   'h+="</div><div class=card><div>"+(p.gates.length>1?"第 "+(S.g+1)+" 步："+esc(g.label):"答案")+"</div><input id=an autocomplete=off><button id=go>送出</button><div class=msg id=ms></div><div id=hs></div><button class=ghost id=hb></button></div>";app.innerHTML=h;',
   'Array.prototype.forEach.call(app.querySelectorAll("iframe[data-i]"),function(f){f.srcdoc=p.blocks[+f.getAttribute("data-i")].html});',
   'document.getElementById("go").onclick=submit;document.getElementById("an").onkeydown=function(e){if(e.key==="Enter")submit()};document.getElementById("hb").onclick=hint;renderHints();hintBtn()}',

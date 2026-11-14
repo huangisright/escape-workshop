@@ -69,6 +69,14 @@ textarea{min-height:84px;resize:vertical}
 .checks li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:15px}
 .checks li .dot{margin-top:7px;flex:none}
 .checks li.err{color:var(--err)}.checks li.warn{color:#8a5a12}.checks li.ok{color:var(--ok)}
+.checks li.info{color:var(--muted)}.dot.info{background:#9aa3ad}
+.an-flag{border-top:1px solid var(--line);padding:10px 0 2px}
+.an-steps{padding-left:20px;margin:6px 0}.an-steps li{margin:4px 0}
+.an-p{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0}
+.an-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.an-head .chip{margin-left:auto}
+.an-sec{margin-top:6px;font-size:15px}.an-sec ul{margin:2px 0 0;padding-left:20px}
+.an-note{margin-top:8px;background:var(--acc2);border-radius:8px;padding:8px 12px;font-size:15px}
+.chip.v-fix{background:var(--errbg);color:var(--err)}.chip.v-adjust{background:var(--warnbg);color:var(--warn)}.chip.v-good{background:var(--okbg);color:var(--ok)}
 .sub{border:1px dashed var(--line);border-radius:10px;padding:12px;margin:10px 0;background:#fcfbf8}
 .sub .hd{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:600}
 .sub .hd .sp{flex:1}
@@ -2027,16 +2035,142 @@ function adminView(roomId) {
 }
 function adminStats(roomId) {
   app.innerHTML = topbar('遊玩數據', { back: 'toAdmin' }) + '<div class="wrap"><p class="muted">載入中…</p></div>';
-  api('adminStats', S.code, roomId).then(function (d) {
-    var h = topbar('數據：' + d.title, { back: 'toAdmin' }) + '<div class="wrap"><div class="card"><h3>' + esc(d.title) + '</h3><p>正式遊玩 ' + d.plays + ' 場，逃脫成功 ' + d.escaped + ' 場（試玩不列入）。' + (d.avgEscapeMin !== null && d.avgEscapeMin !== undefined ? '平均逃脫時間 ' + d.avgEscapeMin + ' 分鐘（含跳過扣時）。' : '') + '</p></div>';
-    h += '<div class="card" style="overflow-x:auto"><h3>每一題</h3><table><tr><th>#</th><th>題目</th><th>負責</th><th>預估</th><th>實際平均</th><th>到達／解開</th><th>看提示</th><th>答錯</th><th>跳過</th><th>常見錯誤答案</th><th>難易度</th></tr>' + d.perPuzzle.map(function (p) {
-      var slow = p.avgSolveMin !== null && p.estMinutes && p.avgSolveMin > p.estMinutes * 1.3;
-      return '<tr><td>' + (p.vault ? 'V' : '') + p.no + '</td><td>' + esc(p.title) + '</td><td>' + esc(p.author) + '</td><td>' + (p.estMinutes || '') + ' 分</td><td' + (slow ? ' style="color:var(--err);font-weight:700"' : '') + '>' + (p.avgSolveMin === null ? '—' : p.avgSolveMin + ' 分') + '</td><td>' + p.reached + ' / ' + p.solved + '</td><td>' + p.hintsUsed + '</td><td>' + p.wrongCount + '</td><td>' + (p.skipped || 0) + '</td><td>' +
-        p.topWrong.map(function (w) { return esc(w.answer) + '×' + w.count; }).join('、') + '</td><td>' + (p.avgRating === null ? '—' : p.avgRating + '（' + p.ratingCount + '）') + '</td></tr>';
-    }).join('') + '</table><p class="help" style="margin-top:8px">紅字：實際時間比預估多 30% 以上。V 開頭是寶庫題。</p></div>';
-    h += '<div class="card"><h3>玩家回饋</h3>' + (d.comments.length ? '<ul>' + d.comments.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : '<p class="muted">還沒有。</p>') + '</div></div>';
-    app.innerHTML = h;
-  }).catch(fail);
+  api('adminStats', S.code, roomId).then(function (d) { renderStats(roomId, d); }).catch(fail);
+}
+var VERDICT_LABEL = { good: '不用改', adjust: '小修', fix: '優先修改' };
+function puzzleTag(p) { return (p.vault ? 'V' : '') + p.no; }
+function renderStats(roomId, d) {
+  S.stats = { roomId: roomId, d: d };
+  var h = topbar('數據：' + d.title, { back: 'toAdmin' }) + '<div class="wrap"><div class="card"><h3>' + esc(d.title) + '</h3><p>正式遊玩 ' + d.plays + ' 場，逃脫成功 ' + d.escaped + ' 場（試玩不列入）。' + (d.avgEscapeMin !== null && d.avgEscapeMin !== undefined ? '平均逃脫時間 ' + d.avgEscapeMin + ' 分鐘（含跳過扣時）。' : '') + '</p></div>';
+  // 平台自己判斷的警示
+  var flagged = d.perPuzzle.filter(function (p) { return (p.flags || []).some(function (f) { return f.code !== 'few'; }); });
+  h += '<div class="card"><h3>自動警示</h3><p class="help" style="margin-top:0">平台依遊玩數據自動判斷，不用 AI。紅點建議優先修，黃點值得看一下；玩到的組數少於 3 組的題目先不判斷。</p>' + checksHtml(d.roomFlags || []);
+  h += flagged.length ? flagged.map(function (p) {
+    return '<div class="an-flag"><b>' + puzzleTag(p) + '　' + esc(p.title) + '</b> <span class="muted" style="font-size:13px">' + esc(p.author || '') + '</span>' + checksHtml(p.flags) + '</div>';
+  }).join('') : (d.plays >= 3 ? '<p class="muted">各題都沒有明顯的問題。</p>' : '');
+  h += '</div>';
+  h += analysisCardHtml(d);
+  h += '<div class="card" style="overflow-x:auto"><h3>每一題</h3><table><tr><th>#</th><th>題目</th><th>負責</th><th>預估</th><th>實際平均</th><th>到達／解開</th><th>看提示</th><th>答錯</th><th>跳過</th><th>常見錯誤答案</th><th>難易度</th></tr>' + d.perPuzzle.map(function (p) {
+    var slow = p.avgSolveMin !== null && p.estMinutes && p.avgSolveMin > p.estMinutes * 1.3;
+    return '<tr><td>' + puzzleTag(p) + '</td><td>' + esc(p.title) + '</td><td>' + esc(p.author) + '</td><td>' + (p.estMinutes || '') + ' 分</td><td' + (slow ? ' style="color:var(--err);font-weight:700"' : '') + '>' + (p.avgSolveMin === null ? '—' : p.avgSolveMin + ' 分') + '</td><td>' + p.reached + ' / ' + p.solved + '</td><td>' + p.hintsUsed + '</td><td>' + p.wrongCount + '</td><td>' + (p.skipped || 0) + '</td><td>' +
+      (p.wrongPatterns || []).slice(0, 5).map(function (w) { return esc(w.answer) + '×' + w.count + (w.teams > 1 ? '（' + w.teams + ' 組）' : ''); }).join('、') + '</td><td>' + (p.avgRating === null ? '—' : p.avgRating + '（' + p.ratingCount + '）') + '</td></tr>';
+  }).join('') + '</table><p class="help" style="margin-top:8px">紅字：實際時間比預估多 30% 以上。V 開頭是寶庫題。常見錯誤答案已把大小寫、全半形、標點不同的算成同一個。</p></div>';
+  h += '<div class="card"><h3>玩家回饋</h3>' + (d.comments.length ? '<ul>' + d.comments.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : '<p class="muted">還沒有。</p>') + '</div></div>';
+  app.innerHTML = h;
+  var q = function (id) { return document.getElementById(id); };
+  if (q('anPack')) q('anPack').onclick = function () { downloadAnalysisPack(roomId, q('anPack')); };
+  if (q('anImport')) q('anImport').onclick = function () { showAnalysisImport(roomId); };
+  if (q('anCopy')) q('anCopy').onclick = function () { copyText(designerNotes(d)).then(function () { toast('已複製給設計者的話'); }).catch(fail); };
+}
+function analysisCardHtml(d) {
+  var A = d.analysis;
+  var h = '<div class="card" id="anCard"><h3>AI 分析</h3>';
+  if (!A) {
+    h += '<p class="help" style="margin-top:0">用任何便宜的 AI（ChatGPT、Gemini…）幫你解讀數據：</p><ol class="help an-steps">' +
+      '<li>按「下載分析包」，得到一個 .json 檔（學生名字已換成代號，數字平台都算好了）。</li>' +
+      '<li>把檔案上傳給 AI，跟它說：<b>「請照檔案裡 instructions 的指示分析，依 outputFormat 的格式只回傳 JSON。」</b></li>' +
+      '<li>把 AI 回覆的內容整段複製，按「匯入分析結果」貼上（也可以存成檔案再選檔）。</li></ol>';
+    if (!d.plays) h += '<p class="muted">還沒有正式遊玩的紀錄，現在匯出的話 AI 只能就題目設計本身分析。</p>';
+    return h + '<div class="btns"><button class="btn" id="anPack">下載分析包</button><button class="btn ghost" id="anImport">匯入分析結果</button></div></div>';
+  }
+  var R = A.result, byKey = {};
+  d.perPuzzle.forEach(function (p) { byKey[puzzleTag(p).replace(/^(\d)/, 'P$1')] = p; });
+  var nameOf = function (k) { var p = byKey[k]; return p ? (k.charAt(0) === 'V' ? '寶庫 ' + k.substring(1) : '第 ' + k.substring(1) + ' 題') + '「' + p.title + '」' : k; };
+  var more = d.plays - (A.playsAtExport || 0);
+  h += '<p class="muted" style="font-size:13px;margin-top:0">' + (R.model ? esc(R.model) + ' 分析・' : '') + '匯入於 ' + esc(fmtTime(A.importedAt)) + '・分析時有 ' + (A.playsAtExport || 0) + ' 場資料' +
+    (more > 0 ? '，<b style="color:var(--warn)">之後又多了 ' + more + ' 場</b>，可以重新分析' : '') + '</p>';
+  if ((A.warnings || []).length) h += '<div class="banner" style="font-size:14px">匯入時的提醒：<ul style="margin:4px 0 0">' + A.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></div>';
+  if (R.room.summary) h += '<p class="pre">' + esc(R.room.summary) + '</p>';
+  if (R.room.priorities.length) h += '<h4>先修這幾題</h4><ol>' + R.room.priorities.map(function (x) { return '<li><b>' + esc(nameOf(x.key)) + '</b>：' + esc(x.reason) + '</li>'; }).join('') + '</ol>';
+  if (R.room.strengths.length) h += '<h4>做得好的地方</h4><ul>' + R.room.strengths.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+  if (R.room.flow) h += '<h4>難度與順序</h4><p class="pre">' + esc(R.room.flow) + '</p>';
+  if (R.room.timeLimit) h += '<h4>時間限制</h4><p class="pre">' + esc(R.room.timeLimit) + '</p>';
+  var order = { fix: 0, adjust: 1, good: 2 };
+  h += '<h4>每一題</h4>' + R.puzzles.slice().sort(function (a, b) { return order[a.verdict] - order[b.verdict]; }).map(function (x) {
+    var p = byKey[x.key] || {};
+    var list = function (title, arr) { return arr.length ? '<div class="an-sec"><span class="muted">' + title + '</span><ul>' + arr.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul></div>' : ''; };
+    return '<div class="an-p"><div class="an-head"><b>' + esc(nameOf(x.key)) + '</b><span class="muted" style="font-size:13px">' + esc(p.author || '') + '</span><span class="chip v-' + x.verdict + '">' + VERDICT_LABEL[x.verdict] + '</span></div>' +
+      list('問題', x.problems) + list('可能原因', x.causes) + list('修改建議', x.suggestions) +
+      (x.toDesigner ? '<div class="an-note"><span class="muted">給設計者</span><div>' + esc(x.toDesigner) + '</div></div>' : '') + '</div>';
+  }).join('');
+  return h + '<div class="btns"><button class="btn ghost sm" id="anCopy">複製給設計者的話</button><button class="btn ghost sm" id="anPack">重新下載分析包</button><button class="btn ghost sm" id="anImport">匯入新的結果</button>' +
+    (A.fileUrl ? '<a class="btn ghost sm" target="_blank" href="' + esc(A.fileUrl) + '">雲端原始檔</a>' : '') + '</div></div>';
+}
+function fmtTime(iso) {
+  var t = new Date(iso);
+  if (isNaN(t)) return '';
+  var p = function (n) { return ('0' + n).slice(-2); };
+  return (t.getMonth() + 1) + '/' + t.getDate() + ' ' + p(t.getHours()) + ':' + p(t.getMinutes());
+}
+/** 依設計者整理「給設計者的話」，方便貼給學生 */
+function designerNotes(d) {
+  var by = {}, order = [];
+  var R = d.analysis.result;
+  d.perPuzzle.forEach(function (p) {
+    var key = (p.vault ? 'V' : 'P') + p.no;
+    var x = R.puzzles.filter(function (y) { return y.key === key; })[0];
+    if (!x || !x.toDesigner) return;
+    var who = p.author || '（未署名）';
+    if (!by[who]) { by[who] = []; order.push(who); }
+    by[who].push('・' + puzzleTag(p) + '「' + p.title + '」：' + x.toDesigner);
+  });
+  return order.map(function (w) { return w + '\n' + by[w].join('\n'); }).join('\n\n');
+}
+function copyText(t) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).catch(function () { return copyFallback(t); });
+  return copyFallback(t);
+}
+function copyFallback(t) {
+  return new Promise(function (res, rej) {
+    var ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { }
+    ta.remove();
+    if (ok) res(); else rej(new Error('瀏覽器不讓複製，請手動選取文字'));
+  });
+}
+function downloadAnalysisPack(roomId, btn) {
+  if (btn) btn.disabled = true;
+  api('adminAnalysisPack', S.code, roomId).then(function (r) {
+    var url = URL.createObjectURL(new Blob([JSON.stringify(r.pack, null, 2)], { type: 'application/json' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = r.fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    toast('已下載分析包');
+  }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+}
+function showAnalysisImport(roomId) {
+  var dlg = modal('<h3>匯入 AI 分析結果</h3><p class="help">把 AI 回覆的內容整段貼上就好，前後多了說明文字或 ``` 也沒關係。</p>' +
+    '<textarea id="anText" rows="10" style="width:100%;font-family:ui-monospace,monospace;font-size:13px" placeholder="{ &quot;format&quot;: &quot;escape-workshop-analysis-result&quot;, … }" aria-label="分析結果"></textarea>' +
+    '<p class="help">或選擇檔案：<input type="file" id="anFile" accept=".json,.txt,application/json,text/plain"></p>' +
+    '<div class="btns"><button class="btn" id="anGo">匯入</button></div><div id="anMsg"></div>');
+  var ta = dlg.querySelector('#anText');
+  dlg.querySelector('#anFile').onchange = function (e) {
+    var f = e.target.files[0];
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () { ta.value = rd.result; };
+    rd.readAsText(f, 'utf-8');
+  };
+  dlg.querySelector('#anGo').onclick = function () {
+    var t = ta.value.trim(), msg = dlg.querySelector('#anMsg'), go = dlg.querySelector('#anGo');
+    if (!t) { msg.innerHTML = '<p style="color:var(--err)">還沒有貼上內容</p>'; return; }
+    go.disabled = true;
+    msg.innerHTML = '<p class="muted">檢查中…</p>';
+    api('adminAnalysisImport', S.code, roomId, t).then(function (r) {
+      closeModal();
+      toast(r.warnings.length ? '已匯入，有 ' + r.warnings.length + ' 個提醒' : '已匯入分析結果');
+      var d = S.stats && S.stats.roomId === roomId ? S.stats.d : null;
+      if (d) { d.analysis = r.analysis; renderStats(roomId, d); var c = document.getElementById('anCard'); if (c && c.scrollIntoView) c.scrollIntoView(); }
+      else adminStats(roomId);
+    }).catch(function (e) {
+      go.disabled = false;
+      msg.innerHTML = '<p style="color:var(--err)" class="pre">' + esc((e && e.message) || String(e)) + '</p>';
+    });
+  };
 }
 /** 學生密室的關卡位置：審核時順便設定（示範密室在「挑題與排序」設定） */
 function showPlacesEdit(roomId) {

@@ -1029,6 +1029,79 @@ function checkRoom_(room, puzzles, s, members, deep) {
   return c;
 }
 
+/**
+ * 完成度（給管理頁「完成度一覽」）：只算紅燈（必填）項目，和檢核用同一套規則。
+ * 每題 9 項（老師題 10 項），密室資訊 5 項（學生組再加心智圖）；密室資訊占 20%、題目占 80%。
+ * 每位組員至少算「每人至少幾題」格，還沒出的題以 0 分計；一人多出的題目不會補到別人的空格上。
+ */
+function puzzleItems_(p, kind) {
+  var blocks = p.blocks || [];
+  var contentOk = blocks.length > 0 && blocks.every(function (b) {
+    if ((b.type === 'image' || b.type === 'audio' || b.type === 'html') && !b.fileId) return false;
+    if (b.type === 'link' && !/^https?:\/\//.test(String(b.url || ''))) return false;
+    var k = Math.floor(Number(b.after) || 0);
+    if (k > 0) { var st = (p.steps || [])[k - 1]; if (!st || !String(st.checkpoint || '').trim()) return false; }
+    return true;
+  }) && !blocks.every(function (b) { return blockGate_(b, p.steps) > 0; });
+  var it = [
+    ['名稱', !!String(p.title || '').trim()],
+    ['類型', p.kind === 'digital' || p.kind === 'physical'],
+    ['步驟鏈', (p.steps || []).some(function (x) { return String(x.get || '').trim() && String(x.act || '').trim() && String(x.result || '').trim(); })],
+    ['內容', contentOk],
+    ['答案', splitAnswers_(p.answer).length > 0],
+    ['提示', hintsOf_(p).length > 0],
+    ['預估時間', !!Number(p.estMinutes)],
+    ['主題連結', !!String(p.themeLink || '').trim()]
+  ];
+  if (kind === 'group') it.splice(1, 0, ['負責成員', !!String(p.author || '').trim()]);
+  if (kind === 'teacher') it.push(['科學依據', !!String(p.scienceBasis || '').trim()], ['換皮檢核', !!String(p.reskinCheck || '').trim()]);
+  return it.map(function (x) { return { label: x[0], ok: !!x[1] }; });
+}
+function roomItems_(room) {
+  var has = function (pg) { return !!pg && (!!String(pg.text || '').trim() || !!pg.imageId); };
+  var it = [
+    ['名稱', !!String(room.title || '').trim()],
+    ['封面', has(room.cover)],
+    ['說明頁', (room.story || []).some(has)],
+    ['成功頁', has(room.success)],
+    ['失敗頁', has(room.fail)]
+  ];
+  if (room.kind === 'group') it.push(['心智圖', !!(room.mindmap && (room.mindmap.fileId || room.mindmap.url))]);
+  return it.map(function (x) { return { label: x[0], ok: !!x[1] }; });
+}
+function progress_(room, puzzles, s, members) {
+  var kind = room.kind === 'teacher' ? 'teacher' : 'group';
+  var info = roomItems_(room);
+  var min = Number(s.minPuzzlesPerMember) || 0;
+  var expected = kind === 'group' ? members.length * min : 0;
+  var count = {};
+  members.forEach(function (m) { count[m] = 0; });
+  var others = 0;
+  puzzles.forEach(function (p) { if (count[p.author] !== undefined) count[p.author]++; else others++; });
+  // 每位組員至少算 min 格：多出的題目不會補到還沒出題的人身上
+  var slots = Math.max(1, others + members.reduce(function (t, m) { return t + Math.max(min, count[m]); }, 0));
+  var done = 0;
+  var list = puzzles.map(function (p) {
+    var items = puzzleItems_(p, kind);
+    var ok = items.filter(function (x) { return x.ok; }).length;
+    done += ok / items.length;
+    var sm = summary_(checkPuzzle_(p, s, kind, false));
+    return {
+      id: p.id, title: p.title || '', author: p.author || '', kind: p.kind || '',
+      pct: Math.round(ok / items.length * 100), err: sm.err, warn: sm.warn,
+      missing: items.filter(function (x) { return !x.ok; }).map(function (x) { return x.label; })
+    };
+  });
+  var infoOk = info.filter(function (x) { return x.ok; }).length;
+  // 密室資訊占 20%，題目占 80%
+  var pct = Math.round((infoOk / info.length) * 20 + (done / slots) * 80);
+  return {
+    pct: pct, info: info, puzzles: list, expected: expected,
+    ready: list.filter(function (x) { return !x.err; }).length,
+    lacking: members.filter(function (m) { return count[m] < min; })
+  };
+}
+
 function summary_(checks) {
   return {
     err: checks.filter(function (x) { return x.level === 'err'; }).length,
@@ -1765,6 +1838,7 @@ function adminOverview(code) {
     r.members = members;
     r.puzzleCount = ps.length;
     r.estTotal = ps.reduce(function (t, p) { return t + (Number(p.estMinutes) || 0); }, 0);
+    r.progress = progress_(room, ps, s, members);
     r.puzzleList = ps.map(function (p) {
       return { id: p.id, title: p.title, author: p.author, kind: p.kind, summary: summary_(checkPuzzle_(p, s, room.kind === 'teacher' ? 'teacher' : 'group', false)) };
     });

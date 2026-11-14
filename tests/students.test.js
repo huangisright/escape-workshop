@@ -257,3 +257,23 @@ test('API 開放了學生登入與配組的函式', () => {
   assert.equal(call('adminJoinCode', [env.admin, 'new']).ok, true);
   assert.equal(call('verifyGoogle_', [tok('z@z.z')]).ok, false);
 });
+
+test('組員只算登入的學生：分組代碼上以前手打的名字不列入，存檔時清掉', () => {
+  const env = H.load();
+  const g = env.plain(env.gs.adminCreateGroups(env.admin, [{ name: '第一組', members: '預打甲、預打乙' }]))[0];
+  const ov0 = env.plain(env.gs.adminOverview(env.admin));
+  assert.equal(ov0.codes.filter((c) => c.code === g.code)[0].members, '', '新建組別不再存手打組員');
+  const room = ov0.rooms.filter((r) => r.groupName === '第一組')[0];
+  // 模擬舊資料：試算表裡還留著手打的名字
+  const row = env.gs.readAll_('Codes').filter((r) => r.code === g.code)[0];
+  row.members = '預打甲,預打乙';
+  env.gs.writeRow_('Codes', row._row, row);
+  const [s1] = env.plain(env.gs.adminCreateStudents(env.admin, [{ name: '王小美' }]));
+  env.gs.adminAssignStudent(env.admin, s1.code, room.id);
+  assert.deepEqual(env.plain(env.gs.getWorkspace(s1.code)).members, ['王小美']);
+  assert.deepEqual(env.plain(env.gs.login(g.code)).members, ['王小美'], '用分組代碼登入也只看到登入的學生');
+  assert.deepEqual(env.plain(env.gs.adminOverview(env.admin)).rooms.filter((r) => r.id === room.id)[0].members, ['王小美']);
+  // 管理者在「代碼」分頁按儲存：舊的手打名字一起清掉
+  env.gs.adminUpdateCode(env.admin, g.code, { name: '第一組', members: '又打丙' });
+  assert.equal(env.plain(env.gs.adminOverview(env.admin)).codes.filter((c) => c.code === g.code)[0].members, '');
+});

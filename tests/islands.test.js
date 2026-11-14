@@ -60,7 +60,7 @@ test('只列已發布的學生密室，帶組名、組員、各關設計者與�
   assert.equal(R.group, '第一組');
   assert.equal(R.theme, '小島');
   assert.equal(R.story, '海水上漲了');
-  assert.deepEqual(R.members, ['王小明', '李小華']);
+  assert.deepEqual(R.members, [], '分組代碼上以前手打的組員不列入，組員只算登入後分進來的學生');
   assert.deepEqual(R.puzzles, [{ title: '漲潮時刻表', author: '王小明' }, { title: '消失的海岸線', author: '李小華' }]);
   assert.equal(R.plays, 2);
   assert.equal(R.escaped, 1);
@@ -107,14 +107,14 @@ function studentRoom(env, groupName, people) {
 
 test('設定關掉公開名字：後端完全不送出組員與設計者，只剩組名', () => {
   const env = H.load();
-  publishedGroupRoom(env, '第一組', ['王小明', '李小華'], [{ title: '漲潮時刻表', author: '王小明', answer: 'TIDE' }]);
+  studentRoom(env, '第一組', [{ name: '王小明', title: '漲潮時刻表' }, { name: '李小華', title: '消失的海岸線' }]);
   assert.equal(env.plain(env.gs.islandRooms()).names, true);
   env.gs.adminSaveSettings(env.admin, { islandNames: false });
   const out = env.plain(env.gs.islandRooms()); // 存設定就清快取，馬上生效
   assert.equal(out.names, false);
   assert.equal(out.rooms[0].group, '第一組');
   assert.deepEqual(out.rooms[0].members, []);
-  assert.deepEqual(out.rooms[0].puzzles, [{ title: '漲潮時刻表', author: '' }]);
+  assert.deepEqual(out.rooms[0].puzzles, [{ title: '漲潮時刻表', author: '' }, { title: '消失的海岸線', author: '' }]);
   const raw = JSON.stringify(out);
   assert.ok(!raw.includes('王小明') && !raw.includes('李小華'), '名字不能出現在回應裡');
   env.gs.adminSaveSettings(env.admin, { islandNames: true });

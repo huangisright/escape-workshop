@@ -336,9 +336,7 @@ function account_(code) {
   if (!code) throw new Error('請輸入代碼');
   var rows = codes_();
   for (var i = 0; i < rows.length; i++) if (String(rows[i].code).toUpperCase() === code) {
-    var a = rows[i];
-    a.membersList = String(a.members || '').split(/[,，、\s]+/).filter(function (x) { return x; });
-    return a;
+    return rows[i];
   }
   throw new Error('代碼不正確，請再確認一次');
 }
@@ -372,9 +370,13 @@ function canEditRoom_(acct, room) {
 function login(code) {
   var a = account_(code);
   var out = {
-    code: a.code, role: a.role, name: a.name, members: a.membersList,
+    code: a.code, role: a.role, name: a.name, members: [],
     roomId: a.roomId, settings: settings_(), appUrl: appUrl_()
   };
+  if (a.role === 'group') {
+    var groom = a.roomId ? getDoc_('Rooms', a.roomId) : null;
+    out.members = groom ? membersOfRoom_(groom) : [];
+  }
   if (a.role === 'student') {
     out.school = a.school || '';
     out.email = a.email || '';
@@ -501,7 +503,7 @@ function getWorkspace(code) {
     return {
       room: stripRow_(room),
       puzzles: puzzles.map(function (p) { return withChecks_(p, s, 'group'); }),
-      roomChecks: checkRoom_(room, puzzles, s, a.membersList, false),
+      roomChecks: checkRoom_(room, puzzles, s, membersOfRoom_(room), false),
       editable: room.status === 'draft'
     };
   }
@@ -728,13 +730,11 @@ function roomVault_(room) {
   return (room.vaultIds || []).map(function (id) { return byId[id]; })
     .filter(function (p) { return p && !p.deleted; });
 }
-/** 組員名單：分組代碼上手打的名字（舊做法）＋被分到這一組的學生（新做法） */
+/** 組員名單：只算登入後被分到這一組的學生（分組代碼上以前手打的名字不再列入） */
 function membersOfRoom_(room) {
   if (room.kind !== 'group') return [];
-  var rows = codes_();
-  var c = rows.filter(function (r) { return r.code === room.ownerCode; })[0];
-  var names = c ? String(c.members || '').split(/[,，、\s]+/).filter(function (x) { return x; }) : [];
-  rows.forEach(function (r) {
+  var names = [];
+  codes_().forEach(function (r) {
     if (r.role === 'student' && r.roomId === room.id && names.indexOf(r.name) < 0) names.push(r.name);
   });
   return names;
@@ -1787,7 +1787,7 @@ function adminSaveSettings(code, data) {
   return s;
 }
 
-/** list: [{name:'第一組', members:'甲,乙,丙'}] */
+/** list: [{name:'第一組'}]；組員改由學生登入後分組，不再手打 */
 function adminCreateGroups(code, list) {
   var a = account_(code);
   needRole_(a, ['admin']);
@@ -1805,7 +1805,7 @@ function adminCreateGroups(code, list) {
       room.groupName = name;
       putDoc_('Rooms', room);
       appendRow_('Codes', {
-        code: c, role: 'group', name: name, members: normMembers_(g.members),
+        code: c, role: 'group', name: name, members: '',
         roomId: room.id, created: nowStr_()
       });
       made.push({ code: c, name: name });
@@ -1976,9 +1976,6 @@ function adminSetLeader(code, roomId, sc) {
   });
 }
 
-function normMembers_(m) {
-  return String(m || '').split(/[,，、\s]+/).filter(function (x) { return x; }).join(',');
-}
 function adminUpdateCode(code, target, data) {
   var a = account_(code);
   needRole_(a, ['admin']);
@@ -1987,7 +1984,7 @@ function adminUpdateCode(code, target, data) {
     var r = rows.filter(function (x) { return x.code === target; })[0];
     if (!r) throw new Error('找不到代碼');
     if (data.name !== undefined) r.name = String(data.name).trim() || r.name;
-    if (data.members !== undefined) r.members = normMembers_(data.members);
+    if (r.role === 'group') r.members = ''; // 以前手打的組員名單，存檔時一併清掉
     writeRow_('Codes', r._row, r);
     if (r.roomId && data.name !== undefined) {
       var room = getDoc_('Rooms', r.roomId);

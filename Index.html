@@ -155,6 +155,7 @@ body.playing{background:#12161b;color:#eef0f2}
 .pcard iframe{width:100%;border:0;border-radius:10px;background:#fff;margin:10px 0}
 .pcard .cap{color:#aab3bd;font-size:15px}
 .propfile{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}.propfile .thumb{max-height:70px;margin:0}.propfile .nm{font-size:14px;word-break:break-all}
+.propnote{font-size:13px;color:#555;white-space:pre-wrap;margin-top:4px}
 .pdfbadge{display:inline-block;background:#c0392b;color:#fff;font-weight:700;font-size:12px;padding:6px 8px;border-radius:6px}
 .pblk.new{animation:blkin 1.6s ease-out}
 @keyframes blkin{0%{opacity:0;box-shadow:0 0 0 3px #f3c969;border-radius:10px}40%{opacity:1;box-shadow:0 0 0 3px #f3c969;border-radius:10px}100%{box-shadow:0 0 0 0 transparent}}
@@ -871,6 +872,102 @@ function compressImage(file, maxEdge, quality) {
 }
 function b64Of(dataUrl) { return dataUrl.substring(dataUrl.indexOf(',') + 1); }
 
+/* ---------- 道具列印檔：手機照片、iPad 掃描轉成好印的檔案 ---------- */
+var PRINT_MAX = 8 * 1024 * 1024;   // 後端上限
+var PRINT_KEEP = 3 * 1024 * 1024;  // PNG／JPG 小於這個大小、尺寸也不大，就原檔上傳
+var PRINT_EDGE = 3508;             // A4 300 dpi 的長邊
+var HEIC2ANY_URL = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+function isHeic(file) { return /^image\/hei[cf]/i.test(file.type || '') || /\.hei[cf]$/i.test(file.name || ''); }
+function printMimeOf(file) {
+  var t = String(file.type || '').toLowerCase(), n = String(file.name || '');
+  if (t === 'application/pdf' || /\.pdf$/i.test(n)) return 'application/pdf';
+  if (isHeic(file)) return 'image/heic';
+  if (/^image\//.test(t) && !/svg|gif/.test(t)) return t;
+  if (/\.png$/i.test(n)) return 'image/png';
+  if (/\.jpe?g$/i.test(n)) return 'image/jpeg';
+  if (/\.webp$/i.test(n)) return 'image/webp';
+  return '';
+}
+function loadScriptOnce(url, globalName) {
+  if (window[globalName]) return Promise.resolve(window[globalName]);
+  return new Promise(function (res, rej) {
+    var s = document.createElement('script');
+    s.src = url;
+    s.onload = function () { window[globalName] ? res(window[globalName]) : rej(new Error('載入失敗')); };
+    s.onerror = function () { rej(new Error('載入失敗')); };
+    document.head.appendChild(s);
+  });
+}
+function blobToImage(blob) {
+  return new Promise(function (res, rej) {
+    var u = URL.createObjectURL(blob), img = new Image();
+    img.onload = function () { res(img); setTimeout(function () { URL.revokeObjectURL(u); }, 0); };
+    img.onerror = function () { URL.revokeObjectURL(u); rej(new Error('讀不出這張圖')); };
+    img.src = u;
+  });
+}
+/** 先讓瀏覽器自己讀（Safari 讀得懂 HEIC）；讀不懂的 HEIC 再載入轉檔程式 */
+function decodePrintImage(file) {
+  return blobToImage(file).catch(function (e) {
+    if (!isHeic(file)) throw e;
+    toast('正在轉換 iPhone 照片（HEIC）…');
+    return loadScriptOnce(HEIC2ANY_URL, 'heic2any').then(function (fn) {
+      return fn({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+    }).then(function (out) { return blobToImage(Array.isArray(out) ? out[0] : out); })
+      .catch(function () { throw new Error('這張 HEIC 照片轉不過來，請在 iPhone「設定 → 相機 → 格式」改成「最相容」再拍，或改用 iPad「掃描文件」存成 PDF'); });
+  });
+}
+function canvasToBlob(c, quality) {
+  return new Promise(function (res) {
+    if (c.toBlob) return c.toBlob(function (b) { res(b); }, 'image/jpeg', quality);
+    var u = c.toDataURL('image/jpeg', quality), bin = atob(b64Of(u)), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    res(new Blob([arr], { type: 'image/jpeg' }));
+  });
+}
+function drawJpeg(img, maxEdge, quality) {
+  var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, maxEdge / Math.max(w, h));
+  var c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+  var g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);  // 透明的地方印成白色
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return canvasToBlob(c, quality);
+}
+/**
+ * 道具列印檔：回傳 { file, mime, converted }
+ * - PDF：原檔（超過 8 MB 擋下）
+ * - 小的 PNG／JPG：原檔，線條最清楚
+ * - HEIC、WebP、太大或太大張的照片：轉成 A4 300 dpi 以內的 JPG
+ */
+function preparePrintFile(file) {
+  var mime = printMimeOf(file);
+  if (!mime) return Promise.reject(new Error('列印檔要是圖片（照片、掃描圖）或 PDF'));
+  if (mime === 'application/pdf') {
+    if (file.size > PRINT_MAX) return Promise.reject(new Error('PDF 超過 8 MB。用 iPad 掃描時可改成「灰階」，或把頁數拆成兩份上傳'));
+    return Promise.resolve({ file: file, mime: mime, converted: false });
+  }
+  var base = String(file.name || '列印檔').replace(/\.[A-Za-z0-9]{1,5}$/, '') || '列印檔';
+  return decodePrintImage(file).then(function (img) {
+    var small = Math.max(img.naturalWidth, img.naturalHeight) <= PRINT_EDGE;
+    if ((mime === 'image/png' || mime === 'image/jpeg') && file.size <= PRINT_KEEP && small) {
+      return { file: file, mime: mime, converted: false };
+    }
+    var tries = [[PRINT_EDGE, 0.9], [PRINT_EDGE, 0.8], [2480, 0.8]];
+    var go = function (i) {
+      return drawJpeg(img, tries[i][0], tries[i][1]).then(function (b) {
+        if (b.size > PRINT_MAX && i + 1 < tries.length) return go(i + 1);
+        if (b.size > PRINT_MAX) throw new Error('這張圖壓縮後還是超過 8 MB，請裁小一點再上傳');
+        var f;
+        try { f = new File([b], base + '.jpg', { type: 'image/jpeg' }); } catch (e) { f = b; f.name = base + '.jpg'; }
+        return { file: f, mime: 'image/jpeg', converted: true };
+      });
+    };
+    return go(0);
+  });
+}
+
 /** 上傳一般檔案（圖片會先壓縮） */
 function uploadMedia(file, kind, meta) {
   var p;
@@ -1357,12 +1454,14 @@ function renderPuzzleEditor() {
   h += '</div>';
 
   // 6 道具
-  h += '<div class="card"><h3><span class="no">6</span>道具與佈置</h3><p class="help">老師會把它整理成各組的材料清單。<br>需要老師幫忙<b>印出來</b>的圖或文件，在道具旁邊上傳 PNG、JPG 或 PDF（上限 8 MB），老師會統一列印。列印檔只有老師和同組看得到，闖關的玩家看不到。</p>';
+  h += '<div class="card"><h3><span class="no">6</span>道具與佈置</h3><p class="help">老師會把它整理成各組的材料清單。<br>需要老師幫忙<b>印出來</b>的圖或文件，在道具旁邊上傳圖片或 PDF，老師會統一列印。<b>手寫或手繪的道具</b>：用 iPad「檔案」App 的「掃描文件」存成 PDF 最清楚；直接拍照也可以（iPhone 的 HEIC 照片會自動轉成 JPG）。列印檔只有老師和同組看得到，闖關的玩家看不到。</p>';
   (p.props || []).forEach(function (x, i) {
     h += '<div class="sub" style="margin-bottom:8px"><div class="row"><div><label class="f">道具</label><input type="text" data-f="props.' + i + '.item" value="' + esc(x.item) + '"' + dis + '></div>' +
       '<div><label class="f">擺放位置</label><input type="text" data-f="props.' + i + '.place" value="' + esc(x.place) + '"' + dis + '></div>' +
       (ro ? '' : '<div style="flex:none;min-width:0"><button class="iconbtn" data-act="delRow" data-arr="props" data-i="' + i + '" aria-label="刪除道具">✕</button></div>') + '</div>' +
-      propFileHtml(x, i, ro) + '</div>';
+      propFileHtml(x, i, ro) +
+      '<label class="f">製作說明（選填）：怎麼摺、怎麼剪、用什麼特殊材料，掃描檔看不出來的都寫這裡</label>' +
+      '<textarea data-f="props.' + i + '.note" rows="2" placeholder="例如：對摺兩次，答案寫在背面；用檸檬汁寫的字，要用吹風機烘才看得到"' + dis + '>' + esc(x.note) + '</textarea></div>';
   });
   if (!ro) h += '<button class="btn ghost sm" data-act="addRow" data-arr="props">＋ 新增道具</button>';
   h += '</div>';
@@ -1409,7 +1508,7 @@ function blockEditorHtml(b, i, ro) {
   }
   return h + revealPickerHtml(b, i, ro) + '</div>';
 }
-/** 道具的列印檔（PNG／JPG／PDF），只給老師列印用 */
+/** 道具的列印檔（圖片或 PDF），只給老師列印用 */
 function propFileHtml(x, i, ro) {
   var h = '';
   if (x.fileId) {
@@ -1420,7 +1519,7 @@ function propFileHtml(x, i, ro) {
       (ro ? '' : '<button class="iconbtn" data-act="clearPropFile" data-i="' + i + '">移除</button>') + '</div>';
   }
   if (!ro) h += '<label class="f" style="margin-top:6px">' + (x.fileId ? '換一個列印檔' : '要印出來的檔案（選填）') + '</label>' +
-    '<input type="file" accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf" data-upload="propfile" data-i="' + i + '">';
+    '<input type="file" accept="image/*,application/pdf,.png,.jpg,.jpeg,.heic,.heif,.webp,.pdf" data-upload="propfile" data-i="' + i + '">';
   return h;
 }
 /** 區塊什麼時候出現：一開始，或第幾步的中途答案答對後 */
@@ -1831,7 +1930,7 @@ function adminView(roomId) {
       h += '<div class="card"><h3>第 ' + (i + 1) + ' 題　' + esc(p.title) + '</h3><div class="kv"><span class="muted">負責</span><span>' + esc(p.author) + '</span><span class="muted">類型</span><span>' + kindLabel(p.kind) + '</span><span class="muted">預估</span><span>' + esc(p.estMinutes) + ' 分鐘</span><span class="muted">答案</span><span><b>' + esc(p.answer) + '</b></span></div>' +
         '<h3 style="font-size:16px;margin-top:12px">解題步驟鏈</h3><ol>' + (p.steps || []).map(function (s) { return '<li>' + esc(s.get) + ' → ' + esc(s.act) + ' → ' + esc(s.result) + (s.checkpoint ? '（中途答案：' + esc(s.checkpoint) + '）' : '') + '</li>'; }).join('') + '</ol>' +
         '<h3 style="font-size:16px">提示</h3><ol>' + (p.hints || []).map(function (x) { return '<li>' + esc(x.text) + '（' + esc(x.delaySec) + ' 秒）' + (x.imageId ? '<br><img class="thumb" data-file="' + esc(x.imageId) + '" alt="提示圖片">' : '') + '</li>'; }).join('') + '</ol>' +
-        ((p.props || []).length ? '<h3 style="font-size:16px">道具</h3><ul>' + p.props.map(function (x) { return '<li>' + esc(x.item) + (x.place ? '：' + esc(x.place) : '') + '</li>'; }).join('') + '</ul>' : '') +
+        ((p.props || []).length ? '<h3 style="font-size:16px">道具</h3><ul>' + p.props.map(function (x) { return '<li>' + esc(x.item) + (x.place ? '：' + esc(x.place) : '') + (String(x.note || '').trim() ? '<br><span class="muted pre">📝 ' + esc(x.note) + '</span>' : '') + '</li>'; }).join('') + '</ul>' : '') +
         '<div class="kv"><span class="muted">主題連結</span><span class="pre">' + esc(p.themeLink) + '</span>' + (p.scienceBasis ? '<span class="muted">科學依據</span><span class="pre">' + esc(p.scienceBasis) + '</span>' : '') + (p.reskinCheck ? '<span class="muted">換皮檢核</span><span class="pre">' + esc(p.reskinCheck) + '</span>' : '') + '</div>' +
         '<div class="btns"><button class="btn ghost sm" data-act="previewById" data-id="' + p.id + '">用玩家角度看</button></div>' +
         '<h3 style="font-size:16px;margin-top:12px">檢核</h3>' + checksHtml(p.checks) + '</div>';
@@ -1982,19 +2081,19 @@ function showMaterials() {
     S.prints._all = all;
     var h = topbar('材料清單', { back: 'toAdmin' }) + '<div class="wrap"><div class="btns noprint" style="margin-bottom:12px"><button class="btn" data-act="print">列印清單</button>' +
       (all.length ? '<button class="btn ghost" data-act="downloadPrints" data-id="_all">⬇ 下載全部列印檔（' + all.length + ' 個）</button>' : '') + '</div>' +
-      (all.length ? '<p class="help noprint">列印檔是學生在謎題卡「道具與佈置」上傳的 PNG、JPG、PDF，下載後再統一列印。一次下載很多個時，瀏覽器可能會問要不要允許下載多個檔案，請選允許。</p>' : '');
+      (all.length ? '<p class="help noprint">列印檔是學生在謎題卡「道具與佈置」上傳的圖片或 PDF（手機照片已自動轉成 JPG），下載後再統一列印。📝 是學生寫的製作說明（摺法、剪法、特殊材料）。一次下載很多個時，瀏覽器可能會問要不要允許下載多個檔案，請選允許。</p>' : '');
     rooms.forEach(function (r) {
       var n = S.prints[r.id].length;
       h += '<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><h3 style="margin-bottom:2px">' + esc(r.groupName || r.title) + (r.location ? '　📍' + esc(r.location) : '') + '</h3><p class="muted" style="margin:0 0 8px">' + esc(r.title) + '</p></div>' +
         (n ? '<button class="btn ghost sm noprint" data-act="downloadPrints" data-id="' + esc(r.id) + '">⬇ 這組的列印檔（' + n + '）</button>' : '') + '</div>' +
         '<table><tr><th>#</th><th>題目</th><th>負責</th><th>類型</th><th>道具</th><th>擺放位置</th><th>列印檔</th><th>✓</th></tr>';
       r.puzzles.forEach(function (p) {
-        var props = p.props.filter(function (x) { return String(x.item || '').trim() || x.fileId; });
+        var props = p.props.filter(function (x) { return String(x.item || '').trim() || x.fileId || String(x.note || '').trim(); });
         if (!props.length) props = [{ item: '—', place: '' }];
         props.forEach(function (x, k) {
           var pf = x.fileId ? S.prints[r.id].filter(function (f) { return f.fileId === x.fileId; })[0] : null;
           h += '<tr>' + (k === 0 ? '<td rowspan="' + props.length + '">' + p.no + '</td><td rowspan="' + props.length + '">' + esc(p.title) + '</td><td rowspan="' + props.length + '">' + esc(p.author) + '</td><td rowspan="' + props.length + '">' + kindLabel(p.kind) + '</td>' : '') +
-            '<td>' + esc(x.item || '（列印檔）') + '</td><td>' + esc(x.place) + '</td><td>' +
+            '<td>' + esc(x.item || '（列印檔）') + (String(x.note || '').trim() ? '<div class="propnote">📝 ' + esc(x.note) + '</div>' : '') + '</td><td>' + esc(x.place) + '</td><td>' +
             (pf ? '🖨 ' + esc(pf.label) + ' <button class="iconbtn noprint" data-act="downloadFile" data-fid="' + esc(pf.fileId) + '" data-name="' + esc(pf.name) + '">下載</button>' : '') +
             '</td><td>☐</td></tr>';
         });
@@ -2563,22 +2662,23 @@ app.addEventListener('change', function (e) {
   }
   if (up === 'propfile') {
     var pi = Number(t.getAttribute('data-i')), pp = S.puzzle;
-    var pmime = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : /\.png$/i.test(file.name) ? 'image/png' : /\.jpe?g$/i.test(file.name) ? 'image/jpeg' : '');
-    if (!/^(image\/png|image\/jpeg|application\/pdf)$/.test(pmime)) { t.value = ''; return toast('列印檔只能是 PNG、JPG 或 PDF', 'err'); }
-    if (file.size > 8 * 1024 * 1024) { t.value = ''; return toast('檔案超過 8 MB，請先壓縮', 'err'); }
-    var pf = file;
-    try { if (!file.type) pf = new File([file], file.name, { type: pmime }); } catch (e) { }
     var pitem = String((pp.props[pi] || {}).item || '').trim();
-    // 用原檔上傳、不壓縮，列印才清楚
-    uploadMedia(pf, 'file', { roomId: pp.roomId, puzzleId: pp.id, label: '列印檔' + (pitem ? '-' + pitem : '') }).then(function (r) {
+    var prep;
+    // 小的 PNG／JPG、PDF 用原檔；手機照片（HEIC、太大張）轉成 A4 300 dpi 以內的 JPG
+    preparePrintFile(file).then(function (x) {
+      prep = x;
+      var pf = x.file;
+      try { if (!pf.type) pf = new File([pf], pf.name || file.name, { type: x.mime }); } catch (e) { }
+      return uploadMedia(pf, 'file', { roomId: pp.roomId, puzzleId: pp.id, label: '列印檔' + (pitem ? '-' + pitem : '') });
+    }).then(function (r) {
       if (!pp.props[pi]) return;
       pp.props[pi].fileId = r.fileId;
-      pp.props[pi].fileName = file.name;
-      pp.props[pi].fileMime = pmime;
-      toast('上傳完成');
+      pp.props[pi].fileName = prep.file.name || file.name;
+      pp.props[pi].fileMime = prep.mime;
+      toast(prep.converted ? '上傳完成（照片已轉成適合列印的 JPG）' : '上傳完成');
       S.saver.touch();
       renderPuzzleEditor();
-    }).catch(fail);
+    }).catch(function (e) { t.value = ''; fail(e); });
   }
   if (up === 'hintimg') {
     var hi = Number(t.getAttribute('data-i')), hp = S.puzzle;

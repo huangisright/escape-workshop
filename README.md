@@ -186,7 +186,12 @@
 
 檢核會擋：設定的步驟沒填中途答案、步驟已刪除、所有區塊都設成答對後才出現。
 
-**道具列印檔**：要老師印出來的圖或文件，在第 6 區「道具與佈置」每個道具旁上傳 PNG、JPG 或 PDF（上限 8 MB，原檔不壓縮）。玩家看不到，只有老師和同組看得到。管理者 →「列印材料清單」可以逐檔下載、下載一組的全部，或「下載全部列印檔」；檔名是「組名-第幾題-道具」。檔案也在雲端硬碟「密室工坊」資料夾裡，檔名含「列印檔」。
+**道具列印檔**：要老師印出來的圖或文件，在第 6 區「道具與佈置」每個道具旁上傳圖片或 PDF。玩家看不到，只有老師和同組看得到。管理者 →「列印材料清單」可以逐檔下載、下載一組的全部，或「下載全部列印檔」；檔名是「組名-第幾題-道具」。檔案也在雲端硬碟「密室工坊」資料夾裡，檔名含「列印檔」。
+
+- **PDF**、**小的 PNG／JPG**（3 MB 以下、長邊 3508 像素以內）：原檔上傳，不壓縮，線條最清楚。PDF 上限 8 MB。
+- **手機照片**：iPhone 的 HEIC、WebP，或太大張的照片，上傳前在瀏覽器裡自動轉成 JPG，長邊縮到 3508 像素（A4 300 dpi），透明的地方補成白色。Safari 直接讀得懂 HEIC；Chrome 讀不懂時會從 jsDelivr 載入 heic2any 來轉（只在選了 HEIC 時才載入，出題時要有網路）。
+- **手寫、手繪道具**：建議用 iPad「檔案」App 的「掃描文件」存成 PDF（會自動裁邊、拉正）。多頁的道具掃成同一份 PDF。
+- **製作說明**（選填）：每個道具下面可以寫摺法、剪法、特殊材料等掃描檔看不出來的事，例如「對摺兩次，答案在背面」。材料清單和送審檢視會顯示 📝；玩家拿到的資料（遊玩、斷線包、匯出的離線 HTML）都不含製作說明。
 
 ## 四、營隊當天流程（學生）
 
@@ -257,8 +262,8 @@
 `tests/` 裡用模擬的 Google 服務（試算表、雲端硬碟等）在電腦上跑 `Code.gs`，不用部署：
 
 ```
-node --test tests/backend.test.js tests/climate.test.js tests/free.test.js tests/api.test.js tests/autosave.test.js tests/offline.test.js tests/places.test.js tests/students.test.js tests/islands.test.js   # 後端（islands 另含展示頁的瀏覽器測試）
-node --test tests/ui.test.js tests/offline-ui.test.js tests/pages-offline.test.js tests/students-ui.test.js   # 介面（需要 Playwright 與 Chromium）
+node --test tests/backend.test.js tests/climate.test.js tests/free.test.js tests/api.test.js tests/autosave.test.js tests/offline.test.js tests/places.test.js tests/students.test.js tests/reveal-print.test.js tests/islands.test.js   # 後端（islands 另含展示頁的瀏覽器測試）
+node --test tests/ui.test.js tests/offline-ui.test.js tests/pages-offline.test.js tests/students-ui.test.js tests/reveal-print-ui.test.js tests/print-photo-ui.test.js   # 介面（需要 Playwright 與 Chromium）
 node tests/bench.js                                                 # 量每個動作碰試算表幾次、讀多少資料（越少越快）
 ```
 

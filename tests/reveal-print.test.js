@@ -100,3 +100,27 @@ test('道具列印檔：原檔上傳、存在謎題卡、材料清單拿得到�
   // 同組看得到
   assert.match(env.plain(env.gs.getFileData(g.code, pdf.fileId)).dataUrl, /^data:application\/pdf/);
 });
+
+test('道具製作說明：存在謎題卡、材料清單看得到，玩家拿到的資料裡沒有', () => {
+  const env = H.load();
+  const t = env.plain(env.gs.adminCreateTeachers(env.admin, ['林老師']))[0];
+  const p = env.plain(env.gs.newPuzzle(t.code));
+  const note = '對摺兩次，密碼寫在背面（檸檬汁，要用吹風機烘）';
+  const s = H.savePuzzle(env, t.code, p, H.fullPuzzle({
+    kind: 'physical', answer: 'OCEAN',
+    props: [{ item: '手寫日記', place: '書架', note: note }]
+  }));
+  assert.equal(s.props[0].note, note);
+  assert.equal(env.plain(env.gs.getPuzzle(t.code, p.id)).props[0].note, note);
+
+  const room = env.plain(env.gs.adminCreateTeacherRoom(env.admin, '密室'));
+  env.gs.adminSetRoomPuzzles(env.admin, room.id, [p.id]);
+  H.fillRoomPages(env, env.admin, room.id);
+  const mats = env.plain(env.gs.adminMaterials(env.admin));
+  assert.equal(mats.find((r) => r.id === room.id).puzzles[0].props[0].note, note);
+
+  const pub = env.plain(env.gs.adminRoomAction(env.admin, room.id, 'publish'));
+  const play = H.startPlay(env, pub.playCode);
+  assert.doesNotMatch(JSON.stringify(play), /檸檬汁/, '遊玩狀態不含製作說明');
+  assert.doesNotMatch(JSON.stringify(env.plain(env.gs.playBundle(play.id))), /檸檬汁/, '斷線包不含製作說明');
+});

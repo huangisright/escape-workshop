@@ -68,7 +68,7 @@ var API_FUNCTIONS = ['login', 'studentLogin', 'studentJoin', 'getWorkspace', 'ne
   'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
   'adminJoinCode', 'adminCreateStudents', 'adminUpdateStudent', 'adminDeleteStudent', 'adminAssignStudent', 'adminSetLeader',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminSetRoomPlaces', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
-  'adminMaterials', 'adminLive', 'adminStats', 'adminExport', 'islandRooms'];
+  'adminMaterials', 'adminLive', 'adminStats', 'adminExport', 'adminAnalysisPack', 'adminAnalysisImport', 'islandRooms'];
 
 function doPost(e) {
   var out;
@@ -2339,12 +2339,20 @@ function adminLive(code) {
   }).reverse();
 }
 
-/** 單一密室的遊玩數據（不含試玩） */
+/** 單一密室的遊玩數據（不含試玩），附平台自己判斷的警示；匯入過 AI 分析就一起帶回去 */
 function adminStats(code, roomId) {
   var a = account_(code);
   needRole_(a, ['admin']);
   var room = getDoc_('Rooms', roomId);
   if (!room) throw new Error('找不到密室');
+  var d = roomStats_(room);
+  delete d._puzzles;
+  try { d.analysis = loadAnalysis_(roomId); } catch (e) { d.analysis = null; }
+  return d;
+}
+
+function roomStats_(room) {
+  var roomId = room.id;
   var plays = readAll_('Plays').filter(function (r) { return r.roomId === roomId && !(r.test === '是' || r.test === true) && r.started; });
   var playIds = {};
   plays.forEach(function (p) { playIds[p.id] = 1; });
@@ -2353,7 +2361,8 @@ function adminStats(code, roomId) {
   var latestSnap = room.publishedVersion ? loadSnapshot_(room.publishedVersion) : null;
   var latest = latestSnap ? latestSnap.puzzles : roomPuzzles_(room);
   var vaultList = latestSnap ? (latestSnap.vault || []) : roomVault_(room);
-  var per = latest.concat(vaultList).map(function (p, idx) {
+  var all = latest.concat(vaultList);
+  var per = all.map(function (p, idx) {
     var inVault = idx >= latest.length;
     var i = inVault ? idx - latest.length : idx;
     var ev = events.filter(function (e) { return e.puzzleId === p.id; });
@@ -2366,28 +2375,400 @@ function adminStats(code, roomId) {
     wrong.forEach(function (e) { var k = String(e.value); wc[k] = (wc[k] || 0) + 1; });
     var topWrong = Object.keys(wc).sort(function (x, y) { return wc[y] - wc[x]; }).slice(0, 5)
       .map(function (k) { return { answer: k, count: wc[k] }; });
+    // 同一個錯誤答案有幾「組」答過（大小寫、全半形、標點不同算同一個）
+    var wp = {};
+    wrong.forEach(function (e) {
+      var n = norm_(e.value);
+      if (!n) return;
+      var w = wp[n] = wp[n] || { answer: String(e.value), count: 0, teams: {} };
+      w.count++;
+      w.teams[e.playId] = 1;
+    });
+    var wrongPatterns = Object.keys(wp).map(function (k) {
+      return { answer: wp[k].answer, norm: k, count: wp[k].count, teams: Object.keys(wp[k].teams).length };
+    }).sort(function (x, y) { return y.teams - x.teams || y.count - x.count; }).slice(0, 8);
+    var hintPlays = {};
+    hints.forEach(function (e) { hintPlays[e.playId] = 1; });
     var gateEv = ev.filter(function (e) { return e.type === 'gate'; });
     var rs = ratings.filter(function (x) { return x.puzzleId === p.id && x.rating; }).map(function (x) { return Number(x.rating); });
     var avg = function (arr) { return arr.length ? Math.round(arr.reduce(function (t, v) { return t + v; }, 0) / arr.length * 10) / 10 : null; };
-    return {
+    var out = {
       no: i + 1, vault: inVault, id: p.id, title: p.title, author: p.author, estMinutes: Number(p.estMinutes) || 0,
       reached: Object.keys(reached).length, solved: solves.length,
       avgSolveMin: solves.length ? Math.round(avg(solves.map(function (e) { return Number(e.elapsed) || 0; })) / 6) / 10 : null,
-      hintsUsed: hints.length, wrongCount: wrong.length, topWrong: topWrong,
+      hintsUsed: hints.length, hintTeams: Object.keys(hintPlays).length, wrongCount: wrong.length, topWrong: topWrong,
       gatesPassed: gateEv.length, skipped: ev.filter(function (e) { return e.type === 'skip'; }).length,
       avgRating: avg(rs), ratingCount: rs.length
     };
+    out.wrongPatterns = wrongPatterns.map(function (w) {
+      return { answer: w.answer, count: w.count, teams: w.teams, nearAnswer: nearAnswer_(w.norm, p.answer) };
+    });
+    out.flags = puzzleFlags_(out);
+    return out;
   });
   var escaped = plays.filter(function (p) { return p.result === 'escaped'; });
   var stOf = function (p) { try { return JSON.parse(p.state || '{}'); } catch (e) { return {}; } };
   var escSecs = escaped.map(function (p) { return Number(stOf(p).escapeSec); }).filter(function (x) { return x > 0; });
-  return {
+  var limitMin = latestSnap ? (Number(latestSnap.room.timeLimitMin) || settings_().playMinutes) : (Number(room.timeLimitMin) || settings_().playMinutes);
+  var d = {
     title: room.title, plays: plays.length, escaped: escaped.length,
     avgEscapeMin: escSecs.length ? Math.round(escSecs.reduce(function (t, v) { return t + v; }, 0) / escSecs.length / 6) / 10 : null,
+    timeLimitMin: limitMin, mode: latestSnap ? (latestSnap.room.mode || 'linear') : modeOf_(room),
     vaultTotal: vaultList.length,
     perPuzzle: per,
     comments: ratings.filter(function (x) { return x.comment; }).map(function (x) { return x.comment; })
   };
+  d.roomFlags = roomFlags_(d);
+  d._puzzles = all;
+  return d;
+}
+
+/* ============================================================
+ *  自動警示：平台自己用規則判斷，不靠 AI
+ *  level：err 建議優先修、warn 值得看一下、info 參考
+ *  到達的組數太少時不下判斷（一兩組的數字代表不了什麼）
+ * ============================================================ */
+
+var FLAG_MIN_TEAMS = 3;
+
+/** 錯誤答案是不是「其實很接近正確答案」：多半是答案格式沒講清楚，不是想錯 */
+function nearAnswer_(wrongNorm, answer) {
+  if (!wrongNorm) return false;
+  var digits = function (s) { return String(s).replace(/[^0-9]/g, ''); };
+  return splitAnswers_(answer).some(function (ans) {
+    var an = norm_(ans);
+    if (!an || an === wrongNorm) return false;
+    if (an.length >= 2 && wrongNorm.indexOf(an) >= 0) return true;
+    if (wrongNorm.length >= 2 && an.indexOf(wrongNorm) >= 0) return true;
+    var da = digits(an), dw = digits(wrongNorm);
+    if (da.length >= 2 && da === dw) return true;
+    // 字都一樣、順序不同
+    if (an.length >= 3 && an.length === wrongNorm.length && an.split('').sort().join('') === wrongNorm.split('').sort().join('')) return true;
+    return false;
+  });
+}
+
+function puzzleFlags_(p) {
+  var f = [];
+  var add = function (level, code, msg) { f.push({ level: level, code: code, msg: msg }); };
+  var n = p.reached;
+  var pct = function (x) { return Math.round(x * 100) + '%'; };
+  if (n < FLAG_MIN_TEAMS) {
+    if (n > 0) add('info', 'few', '只有 ' + n + ' 組玩到，先不下判斷');
+    return f;
+  }
+  var rate = p.solved / n;
+  if (rate < 0.5) add('err', 'stuck', '解開率只有 ' + pct(rate) + '（' + n + ' 組玩到、' + p.solved + ' 組解開）');
+  else if (rate < 0.75) add('warn', 'stuck', '解開率 ' + pct(rate) + '（' + n + ' 組玩到、' + p.solved + ' 組解開）');
+  if (p.avgSolveMin !== null && p.estMinutes) {
+    var ratio = p.avgSolveMin / p.estMinutes;
+    if (ratio >= 2) add('err', 'slow', '實際平均 ' + p.avgSolveMin + ' 分鐘，是預估 ' + p.estMinutes + ' 分鐘的 ' + (Math.round(ratio * 10) / 10) + ' 倍');
+    else if (ratio >= 1.3) add('warn', 'slow', '實際平均 ' + p.avgSolveMin + ' 分鐘，比預估 ' + p.estMinutes + ' 分鐘多 ' + Math.round((ratio - 1) * 100) + '%');
+  }
+  (p.wrongPatterns || []).forEach(function (w) {
+    if (w.teams < 2) return;
+    if (w.nearAnswer) add('err', 'format', w.teams + ' 組答成「' + w.answer + '」，跟正確答案很接近：答案格式可能沒講清楚（單位、順序、全名或簡稱）');
+    else if (w.teams / n >= 0.3) add('warn', 'ambiguous', w.teams + ' 組都答成同一個錯誤答案「' + w.answer + '」：題目可能有另一種合理解讀');
+  });
+  if (p.hintTeams / n >= 0.8) add('warn', 'hints', pct(p.hintTeams / n) + ' 的組別要看提示才解得開，題目本身的線索可能不夠');
+  if (p.skipped >= 2 && p.skipped / n >= 0.3) add('err', 'skipped', p.skipped + ' 組直接跳過這一題');
+  if (p.ratingCount >= 3 && p.avgRating !== null && p.avgRating <= 2.5) add('warn', 'rating', '玩家平均只給 ' + p.avgRating + ' 分（' + p.ratingCount + ' 人評分）');
+  if (rate === 1 && p.solved >= FLAG_MIN_TEAMS && p.avgSolveMin !== null && p.estMinutes && p.avgSolveMin <= p.estMinutes * 0.3 && !p.wrongCount && !p.hintTeams)
+    add('info', 'easy', '每組都很快解開、沒人答錯也沒人看提示，可能太簡單');
+  return f;
+}
+
+function roomFlags_(d) {
+  var f = [];
+  var add = function (level, code, msg) { f.push({ level: level, code: code, msg: msg }); };
+  if (d.plays < FLAG_MIN_TEAMS) {
+    add('info', 'few', d.plays ? '目前只有 ' + d.plays + ' 場正式遊玩，警示要等更多組玩過才準' : '還沒有正式遊玩的紀錄');
+    return f;
+  }
+  var rate = d.escaped / d.plays;
+  if (rate < 0.3) add('err', 'escape', '只有 ' + Math.round(rate * 100) + '% 的組別逃脫成功：時間可能太緊，或有題目卡太久');
+  else if (rate < 0.6) add('warn', 'escape', '逃脫成功率 ' + Math.round(rate * 100) + '%');
+  if (d.avgEscapeMin !== null && d.timeLimitMin) {
+    if (d.avgEscapeMin >= d.timeLimitMin * 0.9) add('warn', 'tight', '逃脫的組別平均用了 ' + d.avgEscapeMin + ' 分鐘，幾乎用滿 ' + d.timeLimitMin + ' 分鐘');
+    else if (rate >= 0.9 && d.avgEscapeMin <= d.timeLimitMin * 0.5) add('info', 'loose', '幾乎每組都逃脫，平均只用 ' + d.avgEscapeMin + ' 分鐘，時間很充裕');
+  }
+  var worst = d.perPuzzle.filter(function (p) { return p.flags.some(function (x) { return x.level === 'err'; }); });
+  if (worst.length) add('err', 'fixFirst', '建議先看：' + worst.map(function (p) { return (p.vault ? 'V' : '') + p.no + '「' + p.title + '」'; }).join('、'));
+  return f;
+}
+
+/* ============================================================
+ *  AI 分析包：匯出 → 交給任何 AI → 匯入結果
+ *  - 數字由平台算好，AI 只負責解讀，避免便宜的模型算錯
+ *  - 設計者名字換成〔設計者N〕、評語裡的人名換成〔同學〕；對照表只留在伺服器
+ *  - 結果用 key（P1、V1…）對應題目，匯入時再換回真名
+ * ============================================================ */
+
+var PACK_FORMAT = 'escape-workshop-analysis-pack';
+var RESULT_FORMAT = 'escape-workshop-analysis-result';
+var VERDICTS = { good: 'good', adjust: 'adjust', fix: 'fix', '良好': 'good', '不錯': 'good', '微調': 'adjust', '小修': 'adjust', '要修': 'fix', '需要修改': 'fix', '大修': 'fix' };
+
+var ANALYSIS_INSTRUCTIONS = [
+  '你是國中資優班「密室逃脫設計」課程的謎題設計顧問。這份 JSON 是學生（或老師）設計的一間密室，以及其他組別實際遊玩後，平台算好的數據。請分析每一題，並回傳指定格式的 JSON。',
+  '',
+  '【資料說明】',
+  '- room：整間密室的資料。plays 是正式遊玩場數、escaped 是逃脫成功場數、avgEscapeMin 是逃脫組別的平均用時（分鐘）、timeLimitMin 是時間限制、mode 為 free（自由選題）或 linear（一題接一題）。',
+  '- puzzles：每一題。key 是題目代號（P1、P2…；V1、V2… 是逃脫後的加碼寶庫題）。content 是玩家看到的題目內容（[圖片]、[音檔]、[互動小遊戲] 代表 AI 看不到的媒體，不要猜內容）。steps 是設計者寫的解題步驟。answer 是正確答案（用 / 分隔的是都算對的答案）。hints 是提示。knowledgeBasis 是這題用到的知識依據。',
+  '- stats：reached 玩到的組數、solved 解開的組數、avgSolveMin 平均解題分鐘、estMinutes 設計者預估分鐘、hintTeams 看過提示的組數、skipped 跳過的組數、avgRating 玩家評分（1–5）。',
+  '- wrongPatterns：玩家輸入過的錯誤答案。teams 是幾組答過這個答案，nearAnswer=true 表示跟正確答案很接近。',
+  '- ruleFlags：平台用規則判斷出的警示，你可以引用，但要自己判斷原因。',
+  '- feedback：玩家寫的回饋原文。',
+  '',
+  '【分析項目】每一題都要做：',
+  '1. verdict：整體判斷，只能是 good（不用改）、adjust（小修就好）、fix（建議優先修改）其中一個。',
+  '2. problems：這題的問題，每一點都要附上依據的數字（例如「6 組玩到只有 2 組解開」）。沒有問題就給空陣列。',
+  '3. causes：推測原因。最重要的是看 wrongPatterns：多組答成同一個錯誤答案時，判斷是「題目有另一種合理解讀」「答案格式沒講清楚」「解題步驟中間有一步太跳」還是「需要的知識超出國中生」，並對照 steps 指出是哪一步出問題。',
+  '4. suggestions：1 到 3 個具體、馬上能動手的修改建議（例如改哪一句話、加什麼線索、提示怎麼改）。',
+  '5. toDesigner：寫給這題設計者的一段話（國中生看得懂、先肯定做得好的地方，再給一個最重要的建議，80 字以內）。',
+  '',
+  '整間密室要做：',
+  '- summary：100 字以內的總評。',
+  '- strengths：這間密室做得好的地方（1–3 點）。',
+  '- priorities：最需要先修的題目，依優先順序列出 key 和理由（最多 3 題，沒有就給空陣列）。',
+  '- flow：題目之間的難度安排、順序或自由選題的配置是否合理。',
+  '- timeLimit：時間限制是否合適。',
+  '',
+  '【規則】',
+  '- 只能使用檔案裡給的數字，不要自己重新計算新的統計值，也不要編造數字。',
+  '- 某題 reached 少於 3 時，數據不足，請以題目設計本身為主來分析，並在 problems 或 causes 裡註明「數據不足」。',
+  '- 名字已經換成〔設計者1〕〔同學〕這類代號，請原樣保留代號，不要猜真實姓名。',
+  '- 用繁體中文（台灣用語）。',
+  '- 每一題都要有一筆結果，key 要跟檔案裡的一樣。',
+  '- 只回傳 JSON，不要加任何說明文字，也不要用 ``` 包起來。packId 要照抄檔案裡的值。'
+].join('\n');
+
+function analysisResultTemplate_(packId, keys) {
+  return {
+    format: RESULT_FORMAT, packId: packId, model: '（填你的 AI 名稱，例如 Gemini 2.5 Flash）',
+    room: {
+      summary: '總評', strengths: ['做得好的地方'],
+      priorities: [{ key: keys[0] || 'P1', reason: '為什麼先修這題' }],
+      flow: '難度安排與順序', timeLimit: '時間限制是否合適'
+    },
+    puzzles: keys.map(function (k) {
+      return { key: k, verdict: 'good / adjust / fix 三選一', problems: ['問題（附數字依據）'], causes: ['推測原因'], suggestions: ['具體修改建議'], toDesigner: '給設計者的一段話' };
+    })
+  };
+}
+
+/** 一間密室會出現的人名（設計者、組員、所有學生與老師），長的先換，避免「王小明」被「小明」切掉 */
+function namesToMask_() {
+  var set = {};
+  codes_().forEach(function (c) {
+    if (c.role === 'student' || c.role === 'teacher') set[String(c.name || '').trim()] = 1;
+    if (c.role === 'group') String(c.members || '').split(/[,，、]/).forEach(function (m) { set[String(m).trim()] = 1; });
+  });
+  return Object.keys(set).filter(function (n) { return n.length >= 2; });
+}
+function maskNames_(text, map, others) {
+  var s = String(text === null || text === undefined ? '' : text);
+  var list = Object.keys(map).concat(others.filter(function (n) { return !map[n]; }));
+  list.sort(function (x, y) { return y.length - x.length; });
+  list.forEach(function (n) {
+    if (!n || s.indexOf(n) < 0) return;
+    s = s.split(n).join(map[n] || '〔同學〕');
+  });
+  return s;
+}
+
+function packContent_(p, mask) {
+  var gateNote = function (b) { var k = Math.floor(Number(b.after) || 0); return k > 0 ? '（答對第 ' + k + ' 步後才出現）' : ''; };
+  return (p.blocks || []).map(function (b) {
+    var t = '';
+    if (b.type === 'text') t = String(b.text || '');
+    else if (b.type === 'image') t = '[圖片]' + (b.caption ? ' 說明：' + b.caption : '');
+    else if (b.type === 'audio') t = '[音檔]' + (b.caption ? ' 說明：' + b.caption : '');
+    else if (b.type === 'html') t = '[互動小遊戲]' + (b.caption ? ' 說明：' + b.caption : '');
+    else if (b.type === 'link') t = '[連結] ' + String(b.label || '');
+    else t = '[' + (b.type || '內容') + ']';
+    return mask(gateNote(b) + t);
+  }).filter(function (x) { return x; });
+}
+
+function adminAnalysisPack(code, roomId) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  var room = getDoc_('Rooms', roomId);
+  if (!room) throw new Error('找不到密室');
+  var d = roomStats_(room);
+  if (!d.perPuzzle.length) throw new Error('這個密室還沒有題目');
+  // 遊玩用的是發布版本；知識依據、主題連結等設計欄位只在目前的題目裡
+  var current = getDocs_('Puzzles', d._puzzles.map(function (p) { return p.id; }));
+  var designers = {}, n = 0;
+  d.perPuzzle.forEach(function (p) {
+    var nm = String(p.author || '').trim();
+    if (nm && !designers[nm]) designers[nm] = '〔設計者' + (++n) + '〕';
+  });
+  var others = namesToMask_();
+  var mask = function (t) { return maskNames_(t, designers, others); };
+  var packId = 'pk' + nowMs_().toString(36) + randCode_(3).toLowerCase();
+  var keys = {};
+  var puzzles = d.perPuzzle.map(function (s, idx) {
+    var snapP = d._puzzles[idx];
+    var cur = current[snapP.id] || {};
+    var key = (s.vault ? 'V' : 'P') + s.no;
+    keys[key] = s.id;
+    return {
+      key: key, title: mask(s.title), designer: designers[String(s.author || '').trim()] || '', kind: snapP.kind === 'physical' ? '實體' : '數位',
+      content: packContent_(snapP, mask),
+      steps: (snapP.steps || []).filter(function (x) { return String(x.get || x.act || x.result || '').trim(); }).map(function (x, i) {
+        return { step: i + 1, get: mask(x.get), act: mask(x.act), result: mask(x.result), checkpoint: mask(x.checkpoint || '') };
+      }),
+      answer: mask(snapP.answer),
+      hints: hintsOf_(snapP).map(function (h, i) {
+        return { level: i + 1, text: mask(h.text || '') + (h.imageId ? ' [圖片提示]' : ''), afterSec: Number(h.delaySec) || 0 };
+      }),
+      knowledgeBasis: mask(cur.scienceBasis || ''), themeLink: mask(cur.themeLink || ''),
+      stats: {
+        reached: s.reached, solved: s.solved, avgSolveMin: s.avgSolveMin, estMinutes: s.estMinutes,
+        hintTeams: s.hintTeams, skipped: s.skipped, wrongAttempts: s.wrongCount,
+        avgRating: s.avgRating, ratingCount: s.ratingCount
+      },
+      wrongPatterns: s.wrongPatterns.map(function (w) { return { answer: mask(w.answer), teams: w.teams, times: w.count, nearAnswer: w.nearAnswer }; }),
+      ruleFlags: s.flags.map(function (x) { return x.level + '：' + mask(x.msg); })
+    };
+  });
+  var names = {};
+  Object.keys(designers).forEach(function (nm) { names[designers[nm]] = nm; });
+  PropertiesService.getScriptProperties().setProperty('ANPACK:' + packId,
+    JSON.stringify({ roomId: roomId, keys: keys, names: names, plays: d.plays, ts: nowStr_() }));
+  var pack = {
+    format: PACK_FORMAT, packId: packId,
+    instructions: ANALYSIS_INSTRUCTIONS,
+    outputFormat: analysisResultTemplate_(packId, Object.keys(keys)),
+    room: {
+      title: mask(room.title), plays: d.plays, escaped: d.escaped, avgEscapeMin: d.avgEscapeMin,
+      timeLimitMin: d.timeLimitMin, mode: d.mode, ruleFlags: d.roomFlags.map(function (x) { return x.level + '：' + mask(x.msg); })
+    },
+    puzzles: puzzles,
+    feedback: d.comments.map(mask)
+  };
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyyMMdd-HHmm');
+  return { fileName: ('分析包-' + (room.groupName || room.title) + '-' + stamp + '.json').replace(/[\\\/:*?"<>|]/g, '_'), pack: pack };
+}
+
+/** 從 AI 回覆裡挖出 JSON：容許前後多了說明文字或 ``` 包起來 */
+function extractJson_(text) {
+  var s = String(text || '').replace(/^﻿/, '').trim();
+  s = s.replace(/^```[a-zA-Z]*\s*/, '').replace(/```\s*$/, '').trim();
+  try { return JSON.parse(s); } catch (e) { }
+  var i = s.indexOf('{'), j = s.lastIndexOf('}');
+  if (i >= 0 && j > i) {
+    var mid = s.substring(i, j + 1);
+    try { return JSON.parse(mid); } catch (e) { }
+    // 常見的小毛病：結尾多一個逗號、用了中文引號
+    var fixed = mid.replace(/,\s*([}\]])/g, '$1').replace(/[“”]/g, '"');
+    try { return JSON.parse(fixed); } catch (e) { }
+  }
+  return null;
+}
+function cleanStr_(v, max) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') v = Array.isArray(v) ? v.join('；') : JSON.stringify(v);
+  var s = String(v).trim();
+  return s.length > max ? s.substring(0, max) + '…' : s;
+}
+function cleanList_(v, maxItems, maxLen) {
+  if (v === null || v === undefined || v === '') return [];
+  if (!Array.isArray(v)) v = [v];
+  return v.map(function (x) { return cleanStr_(x, maxLen); }).filter(function (x) { return x; }).slice(0, maxItems);
+}
+
+/** 檢查並整理 AI 回傳的結果。嚴重錯誤丟出例外，小問題列在 warnings 裡、照樣收下 */
+function validateAnalysis_(obj, meta) {
+  var warn = [];
+  if (!obj || typeof obj !== 'object') throw new Error('讀不懂這份內容：找不到 JSON。請確認貼上的是 AI 回覆的完整內容。');
+  if (obj.format && obj.format !== RESULT_FORMAT) warn.push('format 欄位不是 ' + RESULT_FORMAT + '，仍嘗試讀取');
+  var list = Array.isArray(obj.puzzles) ? obj.puzzles : null;
+  if (!list) throw new Error('結果裡沒有 puzzles 陣列。請叫 AI「照 outputFormat 的格式重新輸出完整 JSON」。');
+  var room = obj.room && typeof obj.room === 'object' ? obj.room : {};
+  if (!obj.room) warn.push('缺少整間密室的總評（room）');
+  var seen = {};
+  var puzzles = [];
+  list.forEach(function (p, i) {
+    if (!p || typeof p !== 'object') { warn.push('puzzles 第 ' + (i + 1) + ' 筆不是物件，略過'); return; }
+    var key = String(p.key || '').trim().toUpperCase();
+    if (!meta.keys[key]) { warn.push('puzzles 第 ' + (i + 1) + ' 筆的 key「' + (p.key || '') + '」不在這份分析包裡，略過'); return; }
+    if (seen[key]) { warn.push(key + ' 出現兩次，只留第一筆'); return; }
+    seen[key] = 1;
+    var v = VERDICTS[String(p.verdict || '').trim().toLowerCase()] || VERDICTS[String(p.verdict || '').trim()];
+    if (!v) { warn.push(key + ' 的 verdict「' + cleanStr_(p.verdict, 20) + '」看不懂，當作 adjust'); v = 'adjust'; }
+    puzzles.push({
+      key: key, puzzleId: meta.keys[key], verdict: v,
+      problems: cleanList_(p.problems, 6, 400), causes: cleanList_(p.causes, 6, 400),
+      suggestions: cleanList_(p.suggestions, 5, 400), toDesigner: cleanStr_(p.toDesigner, 400)
+    });
+  });
+  if (!puzzles.length) throw new Error('結果裡沒有任何一題對得上這份分析包（key 應該是 ' + Object.keys(meta.keys).join('、') + '）。');
+  var missing = Object.keys(meta.keys).filter(function (k) { return !seen[k]; });
+  if (missing.length) warn.push('少了這幾題的分析：' + missing.join('、') + '（可以叫 AI 補做這幾題，再匯入一次）');
+  var priorities = (Array.isArray(room.priorities) ? room.priorities : []).map(function (x) {
+    if (typeof x === 'string') { var m = x.match(/[PV]\d+/i); return { key: m ? m[0].toUpperCase() : '', reason: cleanStr_(x, 300) }; }
+    return { key: String((x && x.key) || '').trim().toUpperCase(), reason: cleanStr_(x && x.reason, 300) };
+  }).filter(function (x) { return x.key && meta.keys[x.key]; }).slice(0, 5);
+  return {
+    result: {
+      model: cleanStr_(obj.model, 60),
+      room: {
+        summary: cleanStr_(room.summary, 600), strengths: cleanList_(room.strengths, 5, 300),
+        priorities: priorities, flow: cleanStr_(room.flow, 600), timeLimit: cleanStr_(room.timeLimit, 400)
+      },
+      puzzles: puzzles
+    },
+    warnings: warn
+  };
+}
+
+function adminAnalysisImport(code, roomId, text) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  var room = getDoc_('Rooms', roomId);
+  if (!room) throw new Error('找不到密室');
+  if (String(text || '').length > 400000) throw new Error('內容太長了，確定貼的是分析結果嗎？');
+  var obj = extractJson_(text);
+  if (obj && obj.format === PACK_FORMAT) throw new Error('這是分析包本身，不是 AI 的分析結果。請把分析包交給 AI，再把 AI 回傳的內容匯入。');
+  var packId = obj && String(obj.packId || '').trim();
+  if (obj && !packId) throw new Error('結果裡沒有 packId。請叫 AI 照抄分析包裡的 packId 再輸出一次。');
+  var raw = packId ? PropertiesService.getScriptProperties().getProperty('ANPACK:' + packId) : null;
+  if (obj && !raw) throw new Error('找不到這份結果對應的分析包（packId：' + packId + '）。可能是 AI 抄錯了 packId，請對照分析包檔案裡的值。');
+  var meta = raw ? JSON.parse(raw) : null;
+  if (meta && meta.roomId !== roomId) throw new Error('這份結果是別間密室的分析包，請到那間密室的數據頁匯入。');
+  var v = validateAnalysis_(obj, meta);
+  var record = { packId: packId, importedAt: nowStr_(), playsAtExport: meta.plays, exportedAt: meta.ts, result: v.result, warnings: v.warnings };
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyyMMdd-HHmm');
+  var f = DriveApp.getFolderById(prop_('EX_ID')).createFile(Utilities.newBlob(JSON.stringify(record), 'application/json',
+    ('AI分析-' + (room.groupName || room.title) + '-' + stamp + '.json').replace(/[\\\/:*?"<>|]/g, '_')));
+  PropertiesService.getScriptProperties().setProperty('AN:' + roomId, f.getId());
+  return { warnings: v.warnings, analysis: loadAnalysis_(roomId) };
+}
+
+/** 讀回最近一次匯入的分析，〔設計者N〕換回真名、題目附上目前的編號與名稱 */
+function loadAnalysis_(roomId) {
+  var props = PropertiesService.getScriptProperties();
+  var fid = props.getProperty('AN:' + roomId);
+  if (!fid) return null;
+  var rec = JSON.parse(DriveApp.getFileById(fid).getBlob().getDataAsString('UTF-8'));
+  var meta = JSON.parse(props.getProperty('ANPACK:' + rec.packId) || '{}');
+  var names = meta.names || {};
+  // AI 有時會把括號弄掉（「設計者1」），一併換回
+  var unmask = function (s) {
+    return String(s || '').replace(/〔?設計者(\d+)〕?/g, function (m, n) { return names['〔設計者' + n + '〕'] || m; });
+  };
+  var walk = function (v) {
+    if (typeof v === 'string') return unmask(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') { var o = {}; Object.keys(v).forEach(function (k) { o[k] = walk(v[k]); }); return o; }
+    return v;
+  };
+  rec.result = walk(rec.result);
+  rec.warnings = walk(rec.warnings || []);
+  rec.fileUrl = 'https://drive.google.com/file/d/' + fid + '/view';
+  return rec;
 }
 
 /* ============================================================

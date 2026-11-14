@@ -277,3 +277,35 @@ test('組員只算登入的學生：分組代碼上以前手打的名字不列�
   env.gs.adminUpdateCode(env.admin, g.code, { name: '第一組', members: '又打丙' });
   assert.equal(env.plain(env.gs.adminOverview(env.admin)).codes.filter((c) => c.code === g.code)[0].members, '');
 });
+
+test('老師、管理者也能用 Google 登入：第一次輸入代碼綁定，之後直接進；可以解除綁定', () => {
+  const env = H.load();
+  const [t] = env.plain(env.gs.adminCreateTeachers(env.admin, ['陳老師']));
+  // 第一次：還沒綁定
+  assert.equal(env.plain(env.gs.studentLogin(tok('chen@school.edu.tw'))).needJoin, true);
+  assert.throws(() => env.gs.studentJoin(tok('chen@school.edu.tw'), { staffCode: 'TNOPE' }), /老師代碼不正確/);
+  // 學生的個人代碼、分組代碼不能當老師代碼綁
+  const g = env.plain(env.gs.adminCreateGroups(env.admin, [{ name: '第一組' }]))[0];
+  assert.throws(() => env.gs.studentJoin(tok('chen@school.edu.tw'), { staffCode: g.code }), /老師代碼不正確/);
+  const me = env.plain(env.gs.studentJoin(tok('Chen@School.edu.tw'), { staffCode: t.code.toLowerCase() })).me;
+  assert.equal(me.role, 'teacher');
+  assert.equal(me.code, t.code);
+  // 之後直接登入
+  assert.equal(env.plain(env.gs.studentLogin(tok('chen@school.edu.tw'))).me.code, t.code);
+  // 別人不能再綁同一個代碼
+  assert.throws(() => env.gs.studentJoin(tok('other@gmail.com'), { staffCode: t.code }), /已經綁定別的 Google 帳號/);
+  // 老師的個人代碼欄位不能拿來當學生個人代碼綁
+  assert.throws(() => env.gs.studentJoin(tok('other@gmail.com'), { personalCode: t.code }), /個人代碼不正確/);
+  // 管理頁看得到綁定的帳號，可以解除
+  let ov = env.plain(env.gs.adminOverview(env.admin));
+  assert.equal(ov.codes.filter((c) => c.code === t.code)[0].email, 'chen@school.edu.tw');
+  assert.equal(ov.students.length, 0, '老師不會出現在學生名單');
+  env.gs.adminUpdateCode(env.admin, t.code, { clearEmail: true });
+  assert.equal(env.plain(env.gs.studentLogin(tok('chen@school.edu.tw'))).needJoin, true);
+  assert.equal(env.plain(env.gs.login(t.code)).role, 'teacher', '代碼本身照樣能用');
+
+  // 管理者綁自己的 Google
+  const adm = env.plain(env.gs.studentJoin(tok('isright@gmail.com'), { staffCode: env.admin })).me;
+  assert.equal(adm.role, 'admin');
+  assert.equal(env.plain(env.gs.studentLogin(tok('isright@gmail.com'))).me.role, 'admin');
+});

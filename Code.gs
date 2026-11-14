@@ -426,29 +426,44 @@ function verifyGoogle_(tok) {
   }
   throw new Error('Google 登入驗證失敗，請重新登入' + (why ? '（' + why + '）' : ''));
 }
-function studentByEmail_(email) {
+var GOOGLE_ROLES = ['admin', 'teacher', 'student']; // 可以綁 Google 帳號的身分（分組代碼不行）
+/** 這個 Google 帳號綁在哪個代碼上；同一個 email 同時綁了老師和學生時，以管理者、老師優先 */
+function accountByEmail_(email) {
   email = String(email || '').toLowerCase();
   if (!email) return null;
-  return codes_().filter(function (r) { return r.role === 'student' && String(r.email || '').toLowerCase() === email; })[0] || null;
+  var hits = codes_().filter(function (r) { return GOOGLE_ROLES.indexOf(r.role) >= 0 && String(r.email || '').toLowerCase() === email; });
+  hits.sort(function (x, y) { return GOOGLE_ROLES.indexOf(x.role) - GOOGLE_ROLES.indexOf(y.role); });
+  return hits[0] || null;
 }
-/** 用 Google 登入：已經加入過的學生直接回傳登入資料；第一次來的回傳 needJoin，請他填姓名與加入碼 */
+/** 用 Google 登入：已經綁定的學生、老師、管理者直接回傳登入資料；第一次來的回傳 needJoin（學生填加入碼，老師輸入代碼綁定） */
 function studentLogin(tok) {
   var who = verifyGoogle_(tok);
-  var st = studentByEmail_(who.email);
+  var st = accountByEmail_(who.email);
   if (st) return { me: login(st.code) };
   return { needJoin: true, email: who.email, name: who.name, joinOpen: !!prop_('JOIN_CODE') };
 }
 /**
  * 第一次加入：info = { name, school, joinCode } 用老師公布的加入碼建立帳號；
- * 或 { personalCode } 把老師事先建好的個人代碼綁到這個 Google 帳號（之後就能用 Google 登入）。
+ * 或 { personalCode } 把老師事先建好的個人代碼綁到這個 Google 帳號（之後就能用 Google 登入）；
+ * 或 { staffCode } 老師、管理者把自己的代碼綁到這個 Google 帳號。
  */
 function studentJoin(tok, info) {
   var who = verifyGoogle_(tok);
   info = info || {};
   return withLock_(function () {
-    var st = studentByEmail_(who.email);
+    var st = accountByEmail_(who.email);
     if (st) return { me: login(st.code) };
     var rows = readAll_('Codes');
+    var sc = String(info.staffCode || '').trim().toUpperCase();
+    if (sc) {
+      var staff = rows.filter(function (r) { return (r.role === 'teacher' || r.role === 'admin') && String(r.code).toUpperCase() === sc; })[0];
+      if (!staff) throw new Error('老師代碼不正確，請再確認一次');
+      if (staff.email) throw new Error('這個代碼已經綁定別的 Google 帳號了' + (staff.role === 'admin' ? '' : '，請找管理者解除綁定'));
+      staff.email = who.email;
+      writeRow_('Codes', staff._row, staff);
+      ensureHeader_('Codes');
+      return { me: login(staff.code) };
+    }
     var pc = String(info.personalCode || '').trim().toUpperCase();
     if (pc) {
       var mine = rows.filter(function (r) { return r.role === 'student' && String(r.code).toUpperCase() === pc; })[0];
@@ -1765,7 +1780,7 @@ function adminOverview(code) {
   puzzles.forEach(function (p) { if (p.roomId !== BANK) own[p.ownerCode] = (own[p.ownerCode] || 0) + 1; });
   return {
     settings: s, appUrl: appUrl_(), joinCode: prop_('JOIN_CODE') || '',
-    codes: codes.filter(function (c) { return c.role !== 'student'; }).map(function (c) { return { code: c.code, role: c.role, name: c.name, members: c.members, roomId: c.roomId }; }),
+    codes: codes.filter(function (c) { return c.role !== 'student'; }).map(function (c) { return { code: c.code, role: c.role, name: c.name, members: c.members, roomId: c.roomId, email: c.email || '' }; }),
     students: codes.filter(function (c) { return c.role === 'student'; }).map(function (c) {
       return { code: c.code, name: c.name, school: c.school || '', email: c.email || '', roomId: c.roomId || '', puzzles: own[c.code] || 0, created: c.created, hideName: isHidden_(c) };
     }),
@@ -1985,6 +2000,7 @@ function adminUpdateCode(code, target, data) {
     if (!r) throw new Error('找不到代碼');
     if (data.name !== undefined) r.name = String(data.name).trim() || r.name;
     if (r.role === 'group') r.members = ''; // 以前手打的組員名單，存檔時一併清掉
+    if (data.clearEmail && (r.role === 'teacher' || r.role === 'admin')) r.email = ''; // 解除 Google 綁定
     writeRow_('Codes', r._row, r);
     if (r.roomId && data.name !== undefined) {
       var room = getDoc_('Rooms', r.roomId);

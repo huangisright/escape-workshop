@@ -183,3 +183,62 @@ test('組員：別人的題目唯讀、密室資訊唯讀、看不到送審', { 
     await browser.close();
   }
 });
+
+test('老師用 Google 登入：第一次輸入老師代碼綁定，之後按一下就進來；管理頁看得到綁定的帳號', { skip: !chromium && '沒有 Playwright' }, async () => {
+  const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+  try {
+    const page = await browser.newPage({ viewport: { width: 1024, height: 800 } });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    const html = buildHarness();
+    await page.route('**/*', (route) => {
+      const u = route.request().url();
+      if (u.startsWith(URL)) return route.fulfill({ contentType: 'text/html; charset=utf-8', body: html });
+      if (u.includes('qrcode')) return route.fulfill({ contentType: 'text/javascript', body: 'window.QRCode=function(el,o){el.textContent=o.text;};' });
+      return route.abort();
+    });
+    await page.addInitScript(() => { window.ER_FAKE_GOOGLE = () => Promise.resolve({ idToken: 'test:' + window.__gtok }); });
+    await page.goto(URL);
+    const { A, T } = await page.evaluate(() => {
+      GAS('setup')();
+      const A = GAS('adminCode_')();
+      const T = GAS('adminCreateTeachers')(A, ['陳老師'])[0].code;
+      window.__gtok = 'chen@school.edu.tw|Chen';
+      return { A, T };
+    });
+    await click(page, '[data-act=googleLoginStaff]');
+    await page.waitForSelector('#jStaff');
+    assert.equal(await page.locator('#jName').count(), 0, '老師不會看到學生的加入表單');
+    assert.equal(await page.getAttribute('#jStaff', 'type'), 'password', '代碼輸入時遮住');
+    await page.fill('#jStaff', 'TNOPE1');
+    await click(page, '[data-act=staffBind]');
+    await page.waitForSelector('text=老師代碼不正確');
+    await page.fill('#jStaff', T);
+    await click(page, '[data-act=staffBind]');
+    await page.waitForFunction(() => /陳老師/.test(document.body.innerText) && !document.getElementById('jStaff'));
+    await shot(page, 't1-teacher-home');
+    await click(page, '[data-act=logout]');
+
+    // 第二次：按一下就進來
+    await click(page, '[data-act=googleLoginStaff]');
+    await page.waitForFunction(() => /陳老師/.test(document.body.innerText) && !document.getElementById('jStaff') && !document.getElementById('tcode'));
+    await click(page, '[data-act=logout]');
+
+    // 管理者綁自己的 Google，進管理頁看老師綁定的帳號
+    await page.evaluate(() => { window.__gtok = 'isright@gmail.com|IsRight'; });
+    await click(page, '[data-act=googleLoginStaff]');
+    await page.waitForSelector('#jStaff');
+    await page.fill('#jStaff', A);
+    await click(page, '[data-act=staffBind]');
+    await page.waitForSelector('#adminBody');
+    await click(page, '[data-act=adminTab][data-tab=codes]');
+    await page.waitForSelector('[data-act=unbindStaff]');
+    const body = await page.textContent('#adminBody');
+    assert.match(body, /chen@school\.edu\.tw/);
+    assert.match(body, /管理者的 Google 帳號：isright@gmail\.com/);
+    await shot(page, 't2-admin-codes');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});

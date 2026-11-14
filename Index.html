@@ -1026,7 +1026,9 @@ function showLogin(msg) {
     '<div class="card"><h3>我是玩家</h3><p class="help">輸入遊戲代碼開始玩。</p>' +
     '<input type="text" id="pcode" placeholder="例如 P7KQ2" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
     '<div class="btns"><button class="btn ghost" data-act="toPlay">開始</button></div></div>' +
-    '<div class="card"><h3>老師登入</h3><p class="help">老師代碼、管理者代碼。輸入時會遮住，投影時不會外流。</p>' +
+    '<div class="card"><h3>老師登入</h3><p class="help">用自己的 Google 帳號登入。第一次要輸入一次老師代碼（或管理者代碼）綁定，之後按一下就進來。</p>' +
+    '<button class="gbtn" data-act="googleLoginStaff">' + G_ICON + '老師用 Google 帳號登入</button>' +
+    '<div class="or">或輸入老師、管理者代碼（會遮住，投影時不會外流）</div>' +
     secretInput('tcode', '老師或管理者代碼') +
     '<div class="btns"><button class="btn ghost" data-act="tlogin">進入</button></div></div></div>';
 }
@@ -1035,15 +1037,26 @@ function secretInput(id, ph) {
   return '<div style="display:flex;align-items:center;gap:8px"><input type="password" id="' + id + '" placeholder="' + esc(ph) + '" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0">' +
     '<button type="button" class="btn ghost sm" style="flex:none" data-act="peek" data-for="' + id + '" aria-pressed="false">顯示</button></div>';
 }
-/** Google 登入後：已加入的學生直接進入；第一次來的填姓名與加入碼 */
-function doGoogleLogin() {
+/** Google 登入後：已綁定的學生、老師直接進入；第一次來的學生填姓名與加入碼，老師輸入代碼綁定 */
+function doGoogleLogin(staff) {
   googleSignIn().then(function (tok) {
     S.gTok = tok;
+    S.gStaff = !!staff;
     return api('studentLogin', tok).then(function (r) {
       if (r.me) return finishLogin(r.me);
-      showJoin(r);
+      staff ? showStaffBind(r) : showJoin(r);
     });
   }).catch(function (e) { toast((e && e.message) || String(e), 'err'); });
+}
+/** 老師第一次用 Google 登入：輸入自己的老師代碼（或管理者代碼）綁定這個帳號 */
+function showStaffBind(r, msg) {
+  S.view = 'join';
+  S.joinInfo = r;
+  app.innerHTML = '<div class="login"><h1>老師第一次登入</h1><p class="muted">Google 帳號：' + esc(r.email) + '</p>' +
+    '<div class="card"><h3>綁定老師代碼</h3><p class="help">輸入一次你的老師代碼（管理者輸入管理者代碼），之後用這個 Google 帳號按一下就能進來。</p>' +
+    secretInput('jStaff', '老師或管理者代碼') +
+    (msg ? '<p style="color:var(--err)">' + esc(msg) + '</p>' : '') +
+    '<div class="btns"><button class="btn" data-act="staffBind">綁定並進入</button><button class="btn ghost" data-act="joinBack">換一個帳號</button></div></div></div>';
 }
 function showJoin(r, msg) {
   S.view = 'join';
@@ -1066,7 +1079,7 @@ function sendJoin(info) {
     finishLogin(r.me);
   }).catch(function (e) {
     if (/驗證失敗/.test(e.message)) return showLogin('登入逾時了，請重新用 Google 登入');
-    showJoin(S.joinInfo, e.message);
+    info.staffCode ? showStaffBind(S.joinInfo, e.message) : showJoin(S.joinInfo, e.message);
   });
 }
 function finishLogin(me) {
@@ -1760,9 +1773,15 @@ function adminCodesHtml(d) {
         '<button class="btn danger sm" data-act="deleteGroup" data-code="' + c.code + '">刪除</button></td></tr>';
     }).join('') + '</table><div class="btns"><button class="btn danger sm" data-act="deleteGroups" id="delGroupsBtn" disabled>刪除勾選的組</button></div><p class="help">「刪除」只能刪還沒有任何謎題卡的組別，適合清掉重複建立的組。刪除後代碼立即失效。組員不在這裡打，學生登入後到「學生與分組」分組。</p>';
   h += '<label class="f">一次新增多組（一行一組，只打組名）</label><textarea id="newGroups" placeholder="第一組&#10;第二組"></textarea><div class="btns"><button class="btn" data-act="createGroups">建立分組代碼</button></div></div>';
-  h += '<div class="card"><h3>老師（' + teachers.length + ' 位）</h3><table><tr><th>姓名</th><th>代碼</th><th></th></tr>' + teachers.map(function (c) {
-    return '<tr><td><input type="text" data-codename="' + c.code + '" value="' + esc(c.name) + '"></td><td class="big" style="font-size:18px">' + esc(c.code) + '</td><td><button class="btn ghost sm" data-act="saveCode" data-code="' + c.code + '">儲存</button></td></tr>';
-  }).join('') + '</table><label class="f">新增老師（一行一位）</label><textarea id="newTeachers"></textarea><div class="btns"><button class="btn" data-act="createTeachers">建立老師代碼</button></div></div>';
+  var gcell = function (c) {
+    return c.email ? '<span style="font-size:13px">' + esc(c.email) + '</span> <button class="btn ghost sm" data-act="unbindStaff" data-code="' + c.code + '">解除綁定</button>' : '<span class="muted" style="font-size:13px">還沒綁定</span>';
+  };
+  var adm = d.codes.filter(function (c) { return c.role === 'admin'; })[0];
+  h += '<div class="card"><h3>老師（' + teachers.length + ' 位）</h3><table><tr><th>姓名</th><th>代碼</th><th>Google 帳號</th><th></th></tr>' + teachers.map(function (c) {
+    return '<tr><td><input type="text" data-codename="' + c.code + '" value="' + esc(c.name) + '"></td><td class="big" style="font-size:18px">' + esc(c.code) + '</td><td>' + gcell(c) + '</td><td><button class="btn ghost sm" data-act="saveCode" data-code="' + c.code + '">儲存</button></td></tr>';
+  }).join('') + '</table>' +
+    '<p class="help">老師在登入頁按「老師用 Google 帳號登入」，第一次輸入自己的老師代碼就會綁定。換 Google 帳號時按「解除綁定」，代碼本身照樣能用。</p>' +
+    (adm ? '<p style="font-size:14px">管理者的 Google 帳號：' + gcell(adm) + '</p>' : '') + '<label class="f">新增老師（一行一位）</label><textarea id="newTeachers"></textarea><div class="btns"><button class="btn" data-act="createTeachers">建立老師代碼</button></div></div>';
   h += '<div class="card"><h3>發給學生與老師</h3><p class="help">印出每個代碼的 QR code，掃描就能直接進入自己的上傳頁。' + (url ? '' : '（部署成網頁應用程式後才會有網址）') + '</p><div class="btns"><button class="btn" data-act="printCodes">列印代碼 QR</button></div></div>';
   return h;
 }
@@ -2598,7 +2617,19 @@ var ACTIONS = {
   resumeYes: function () { resumePlay(S.resumeRef); },
   resumeNo: function () { var c = S.resumeParams.c || store('erCode'); c ? doLogin(c, true) : showLogin(); },
   toLogin: function () { if (OFF.pending && !OFF.err) return toast('成績還沒回傳，請先連上網路，等畫面上方出現「已回傳」再離開', 'err'); S.play = null; store('erPlay', null); S.me ? (S.me.role === 'admin' ? showAdmin() : goHome()) : showLogin(); },
-  googleLogin: function () { doGoogleLogin(); },
+  googleLogin: function () { doGoogleLogin(false); },
+  googleLoginStaff: function () { doGoogleLogin(true); },
+  staffBind: function () {
+    var c = document.getElementById('jStaff').value.trim().toUpperCase();
+    if (!c) return toast('請輸入老師代碼', 'err');
+    sendJoin({ staffCode: c });
+  },
+  unbindStaff: function (el) {
+    var c = el.getAttribute('data-code');
+    confirmBox('確定要解除這個代碼的 Google 綁定嗎？\n之後用 Google 登入要再輸入一次代碼綁定；代碼本身照樣能用。', '解除綁定').then(function (ok) {
+      if (ok) api('adminUpdateCode', S.code, c, { clearEmail: true }).then(function () { toast('已解除綁定'); showAdmin('codes'); }).catch(fail);
+    });
+  },
   joinGo: function () {
     var info = { name: document.getElementById('jName').value.trim(), school: document.getElementById('jSchool').value.trim(), joinCode: document.getElementById('jCode').value.trim().toUpperCase() };
     if (!info.name) return toast('請填姓名', 'err');

@@ -45,6 +45,28 @@ textarea{min-height:84px;resize:vertical}
 .dots{display:inline-flex;gap:6px;align-items:center;font-size:13px}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
 .dot.err{background:var(--err)}.dot.warn{background:#e0a72e}.dot.ok{background:var(--ok)}
+.pb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.pb{display:flex;flex-direction:column;justify-content:flex-start;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;text-align:left;font:inherit;color:inherit;width:100%}
+.pb:hover,.pb:focus-visible{border-color:var(--acc);outline:none;box-shadow:0 0 0 2px var(--acc2)}
+.pb-hd{display:flex;align-items:center;gap:8px}
+.pb-hd .n{font-weight:700;font-size:17px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-hd .pct{font-weight:800;font-size:22px;font-variant-numeric:tabular-nums}
+.pb-bar{height:10px;border-radius:99px;background:#ece8df;overflow:hidden;margin:8px 0 10px}
+.pb-bar i{display:block;height:100%;background:var(--acc);border-radius:99px}
+.pb-bar.full i{background:var(--ok)}
+.pb-info{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.pb-info span{font-size:12px;padding:1px 7px;border-radius:99px;background:#f1eee8;color:#9a958b;text-decoration:line-through}
+.pb-info span.ok{background:var(--okbg);color:var(--ok);text-decoration:none}
+.pb-m{display:flex;align-items:center;gap:8px;font-size:14px;padding:3px 0;border-top:1px dashed var(--line)}
+.pb-m .who{width:5.5em;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-m .none{color:var(--err);font-size:13px}
+.pb-q{display:inline-flex;flex-wrap:wrap;gap:4px}
+.pb-q b{width:22px;height:22px;border-radius:6px;border:2px solid var(--err);display:inline-block;position:relative;overflow:hidden;background:#fff}
+.pb-q b i{position:absolute;left:0;right:0;bottom:0;background:#eea39a}
+.pb-q b.warn{border-color:#e0a72e}.pb-q b.warn i{background:#f6d58c}
+.pb-q b.ok{border-color:var(--ok)}.pb-q b.ok i{background:var(--ok)}
+.pb-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted);align-items:center;margin-top:8px}
+.pb-legend .pb-q b{width:16px;height:16px}
 .checks{list-style:none;padding:0;margin:0}
 .checks li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:15px}
 .checks li .dot{margin-top:7px;flex:none}
@@ -1734,7 +1756,7 @@ function renderAdmin() {
   }).join('') + '</div><div id="adminBody"></div></div>';
   app.innerHTML = h;
   var body = document.getElementById('adminBody');
-  if (tab === 'overview') body.innerHTML = adminOverviewHtml(d);
+  if (tab === 'overview') { body.innerHTML = adminOverviewHtml(d); S.timers.push(setInterval(refreshOverviewQuiet, 60000)); }
   if (tab === 'bank') body.innerHTML = adminBankHtml(d);
   if (tab === 'codes') body.innerHTML = adminCodesHtml(d);
   if (tab === 'students') { body.innerHTML = adminStudentsHtml(d); drawQrs(); }
@@ -1771,9 +1793,58 @@ function adminOverviewHtml(d) {
   var h = '<div class="card"><div class="row" style="align-items:center"><div><b>' + esc(d.settings.campName) + '</b><div class="muted" style="font-size:14px">' + groups.length + ' 組：製作中 ' + n('draft') + '、已送審 ' + n('submitted') + '、審核通過 ' + n('approved') + '</div></div>' +
     '<div style="flex:none" class="btns"><button class="btn ghost sm" data-act="materials">列印材料清單</button><button class="btn ghost sm" data-act="refreshAdmin">重新整理</button></div></div></div>';
   if (!groups.length) h += '<div class="banner">還沒有分組。到「學生與分組」分頁開放學生加入、建立組別。</div>';
-  h += '<div class="grid">' + groups.map(roomCardHtml).join('') + '</div>';
+  else if (groups.some(function (r) { return r.progress; })) h += progressBoardHtml(d, groups);
+  h += '<h3 style="margin:18px 0 10px">各組審核</h3><div class="grid">' + groups.map(roomCardHtml).join('') + '</div>';
   if (trooms.length) h += '<h3 style="margin:18px 0 10px">示範密室</h3><div class="grid">' + trooms.map(roomCardHtml).join('') + '</div>';
   return h;
+}
+/* ---------- 完成度一覽 ---------- */
+function pqHtml(q) {
+  var cls = q.err ? '' : (q.warn ? 'warn' : 'ok');
+  var tip = (q.title || '未命名') + '｜' + q.pct + '%' + (q.missing.length ? '｜缺：' + q.missing.join('、') : (q.warn ? '｜有 ' + q.warn + ' 項提醒' : '｜完成'));
+  return '<b class="' + cls + '" title="' + esc(tip) + '" aria-label="' + esc(tip) + '"><i style="height:' + (q.err ? Math.max(8, q.pct) : 100) + '%"></i></b>';
+}
+function progressBoardHtml(d, groups) {
+  var students = d.students || [];
+  var allQ = [], lacking = 0;
+  groups.forEach(function (r) { var g = r.progress || {}; allQ = allQ.concat(g.puzzles || []); lacking += (g.lacking || []).length; });
+  var avg = groups.length ? Math.round(groups.reduce(function (t, r) { return t + ((r.progress || {}).pct || 0); }, 0) / groups.length) : 0;
+  var ready = allQ.filter(function (q) { return !q.err; }).length;
+  var loose = students.filter(function (x) { return !x.roomId; }).length;
+  var h = '<div class="card" id="progressBoard"><div class="row" style="align-items:center"><div><h3 style="margin:0">完成度一覽</h3><div class="muted" style="font-size:14px">平均 ' + avg + '% · 必填完成的題目 ' + ready + ' / ' + allQ.length + ' 題' +
+    (lacking ? ' · <span style="color:var(--err)">還沒出題 ' + lacking + ' 人</span>' : '') + (loose ? ' · 未分組 ' + loose + ' 人' : '') + '</div><div class="muted" style="font-size:13px">' + pbTime() + ' 更新・每分鐘自動更新</div></div></div>';
+  h += '<div class="pb-grid" style="margin-top:12px">' + groups.map(function (r) {
+    var g = r.progress || { pct: 0, info: [], puzzles: [] };
+    var by = {}, order = (r.members || []).slice();
+    (g.puzzles || []).forEach(function (q) {
+      var k = order.indexOf(q.author) >= 0 ? q.author : (q.author || '（沒填負責人）');
+      if (order.indexOf(k) < 0) order.push(k);
+      (by[k] = by[k] || []).push(q);
+    });
+    var t = '<button type="button" class="pb" data-act="adminView" data-id="' + r.id + '"><div class="pb-hd"><span class="n">' + esc(r.groupName || r.title || '') + '</span>' +
+      statusChip(r.status) + (r.published ? '<span class="chip pub">已發布</span>' : '') + '<span class="pct">' + g.pct + '%</span></div>' +
+      '<div class="pb-bar' + (g.pct >= 100 ? ' full' : '') + '"><i style="width:' + g.pct + '%"></i></div>' +
+      '<div class="pb-info">' + (g.info || []).map(function (x) { return '<span class="' + (x.ok ? 'ok' : '') + '">' + esc(x.label) + '</span>'; }).join('') + '</div>';
+    if (!order.length) t += '<div class="pb-m"><span class="none">還沒有組員</span></div>';
+    order.forEach(function (m) {
+      var qs = by[m] || [];
+      t += '<div class="pb-m"><span class="who">' + esc(m) + '</span>' + (qs.length ? '<span class="pb-q">' + qs.map(pqHtml).join('') + '</span>' : '<span class="none">還沒出題</span>') + '</div>';
+    });
+    return t + '</button>';
+  }).join('') + '</div>';
+  h += '<div class="pb-legend"><span class="pb-q"><b class="ok"><i style="height:100%"></i></b></span>完成 <span class="pb-q"><b class="warn"><i style="height:100%"></i></b></span>完成、有提醒 <span class="pb-q"><b><i style="height:45%"></i></b></span>還沒完成（填色＝完成多少）' +
+    '<span>密室資訊：<span style="color:var(--ok)">綠色</span>已完成、灰色刪除線還沒做</span><span>點一組看細項</span></div>';
+  return h + '</div>';
+}
+function pbTime() { var t = new Date(); return ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2); }
+function refreshOverviewQuiet() {
+  if (S.view !== 'admin' || S.admin.tab !== 'overview' || !document.getElementById('progressBoard')) return;
+  api('adminOverview', S.code).then(function (d) {
+    if (S.view !== 'admin' || S.admin.tab !== 'overview' || !document.getElementById('progressBoard')) return;
+    S.admin.data = d;
+    var body = document.getElementById('adminBody');
+    if (body) body.innerHTML = adminOverviewHtml(d);
+  }).catch(function () { /* 網路不穩時下次再試 */ });
 }
 function adminBankHtml(d) {
   var trooms = d.rooms.filter(function (r) { return r.kind === 'teacher'; });

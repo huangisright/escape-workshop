@@ -65,7 +65,7 @@ function doGet(e) {
 var API_FUNCTIONS = ['login', 'studentLogin', 'studentJoin', 'getWorkspace', 'newPuzzle', 'savePuzzle', 'deletePuzzle', 'movePuzzle',
   'saveRoom', 'uploadFile', 'getFileData', 'submitRoom', 'getRoom', 'getPuzzle',
   'playStart', 'startTestPlay', 'playBegin', 'playState', 'playOpen', 'playAnswer', 'playSkip', 'playFinish', 'playHint', 'playHintImage', 'playRate', 'playBundle', 'playSync',
-  'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups',
+  'adminOverview', 'adminSaveSettings', 'adminCreateGroups', 'adminCreateTeachers', 'adminUpdateCode', 'adminDeleteGroup', 'adminDeleteGroups', 'adminParkPuzzle',
   'adminJoinCode', 'adminCreateStudents', 'adminUpdateStudent', 'adminDeleteStudent', 'adminAssignStudent', 'adminSetLeader',
   'adminCreateTeacherRoom', 'adminDeleteRoom', 'adminSetRoomPuzzles', 'adminSetRoomPlaces', 'adminGetRoom', 'adminGetPuzzle', 'adminRoomAction',
   'adminMaterials', 'adminLive', 'adminStats', 'adminExport', 'adminAnalysisPack', 'adminAnalysisImport', 'islandRooms'];
@@ -514,11 +514,11 @@ function getWorkspace(code) {
   if (a.role === 'group') {
     var room = getDoc_('Rooms', a.roomId);
     if (!room) throw new Error('找不到這組的密室，請找老師');
-    var puzzles = roomPuzzles_(room);
+    var puzzles = roomPuzzles_(room, null, true);
     return {
       room: stripRow_(room),
       puzzles: puzzles.map(function (p) { return withChecks_(p, s, 'group'); }),
-      roomChecks: checkRoom_(room, puzzles, s, membersOfRoom_(room), false),
+      roomChecks: checkRoom_(room, activeOnly_(puzzles), s, membersOfRoom_(room), false),
       editable: room.status === 'draft'
     };
   }
@@ -539,7 +539,7 @@ function getWorkspace(code) {
 function studentWorkspace_(a, s) {
   var room = a.roomId ? getDoc_('Rooms', a.roomId) : null;
   if (room && room.deleted) room = null;
-  var puzzles = room ? roomPuzzles_(room) : allDocs_('Puzzles').filter(function (p) {
+  var puzzles = room ? roomPuzzles_(room, null, true) : allDocs_('Puzzles').filter(function (p) {
     return p.ownerCode === a.code && !p.deleted && !p.roomId;
   });
   var me = { name: a.name, code: a.code, school: a.school || '', email: a.email || '' };
@@ -556,7 +556,7 @@ function studentWorkspace_(a, s) {
     student: true, me: me,
     room: stripRow_(room),
     puzzles: list,
-    roomChecks: checkRoom_(room, puzzles, s, membersOfRoom_(room), false),
+    roomChecks: checkRoom_(room, activeOnly_(puzzles), s, membersOfRoom_(room), false),
     editable: room.status === 'draft',
     isLeader: room.leaderCode === a.code,
     leaderName: leader ? leader.name : '',
@@ -565,12 +565,14 @@ function studentWorkspace_(a, s) {
 }
 
 /** saved：剛存好的那一題，直接用它，不必再讀一次 */
-function roomPuzzles_(room, saved) {
+function roomPuzzles_(room, saved, withParked) {
   var byId = getDocs_('Puzzles', room.puzzleIds || []);
   if (saved) byId[saved.id] = saved;
   return (room.puzzleIds || []).map(function (id) { return byId[id]; })
-    .filter(function (p) { return p && !p.deleted; });
+    .filter(function (p) { return p && !p.deleted && (withParked || !p.parked); });
 }
+/** 暫時移出密室的題目不算進檢核、送審、發布與遊玩，但還留在這一組裡，之後能放回來 */
+function activeOnly_(list) { return list.filter(function (p) { return !p.parked; }); }
 function withChecks_(p, s, kind) {
   var x = stripRow_(p);
   x.checks = checkPuzzle_(p, s, kind, false);
@@ -1829,7 +1831,7 @@ function adminOverview(code) {
   var byId = {};
   puzzles.forEach(function (p) { byId[p.id] = p; });
   var rooms = allDocs_('Rooms').filter(function (room) { return !room.deleted; }).map(function (room) {
-    var ps = (room.puzzleIds || []).map(function (id) { return byId[id]; }).filter(function (x) { return x; });
+    var ps = (room.puzzleIds || []).map(function (id) { return byId[id]; }).filter(function (x) { return x && !x.parked; });
     var members = room.kind === 'group' ? membersOfRoom_(room) : [];
     var checks = checkRoom_(room, ps, s, members, false);
     var r = stripRow_(room);
@@ -2146,6 +2148,23 @@ function adminCreateTeacherRoom(code, title) {
   });
 }
 /**
+ * 暫時移出（或放回）密室：題目留在這一組，只是不進檢核、送審、發布和遊玩。
+ * 缺席的學生題目沒做完時，可先移出讓整組照常送審；已發布的密室要重新發布才會生效。
+ */
+function adminParkPuzzle(code, puzzleId, parked) {
+  var a = account_(code);
+  needRole_(a, ['admin']);
+  return withLock_(function () {
+    var p = getDoc_('Puzzles', puzzleId);
+    if (!p || p.deleted) throw new Error('找不到這一題');
+    if (!p.roomId || p.roomId === BANK) throw new Error('這一題不在任何密室裡');
+    p.parked = !!parked;
+    putDoc_('Puzzles', p);
+    return { id: p.id, parked: p.parked };
+  });
+}
+
+/**
  * 刪除示範密室：下架並從管理頁移除。題庫裡的題目不受影響，可以再組成別的密室。
  * 遊玩紀錄與版本快照保留在試算表與雲端硬碟，需要時還查得到。
  */
@@ -2223,14 +2242,14 @@ function adminGetRoom(code, roomId) {
   var s = settings_();
   var room = getDoc_('Rooms', roomId);
   if (!room) throw new Error('找不到密室');
-  var ps = roomPuzzles_(room);
+  var ps = roomPuzzles_(room, null, true);
   var kind = room.kind === 'teacher' ? 'teacher' : 'group';
   return {
     room: stripRow_(room),
     members: membersOfRoom_(room),
     puzzles: ps.map(function (p) { var x = stripRow_(p); x.checks = checkPuzzle_(p, s, kind, true); return x; }),
     vault: roomVault_(room).map(function (p) { var x = stripRow_(p); x.checks = checkPuzzle_(p, s, kind, true); return x; }),
-    roomChecks: checkRoom_(room, ps, s, membersOfRoom_(room), true)
+    roomChecks: checkRoom_(room, activeOnly_(ps), s, membersOfRoom_(room), true)
   };
 }
 function adminGetPuzzle(code, id) {
@@ -2303,7 +2322,7 @@ function adminMaterials(code) {
   return allDocs_('Rooms').filter(function (room) { return !room.deleted; }).map(function (room) {
     return {
       id: room.id, title: room.title, groupName: room.groupName, location: room.location || '', kind: room.kind,
-      puzzles: (room.puzzleIds || []).map(function (id) { return byId[id]; }).filter(function (p) { return p && !p.deleted; })
+      puzzles: (room.puzzleIds || []).map(function (id) { return byId[id]; }).filter(function (p) { return p && !p.deleted && !p.parked; })
         .map(function (p, i) {
           return { no: i + 1, title: p.title, author: p.author, kind: p.kind, props: p.props || [] };
         })
@@ -2326,10 +2345,14 @@ function adminLive(code) {
     try { var sn = loadSnapshot_(st.snap); total = sn.puzzles.length; vaultTotal = (sn.vault || []).length; free = isFree_(sn); } catch (e) { }
     var running = !r.result || (r.result === 'escaped' && st.phase === 'vault');
     var penalty = (Number(st.penaltySec) || 0) * 1000;
+    var result = r.result || '', capSec = null;
+    if (!result && st.startMs) {
+      try { var lim = limitMs_(loadSnapshot_(st.snap)); if (nowMs_() - st.startMs + penalty > lim) { result = 'timeout'; capSec = lim / 1000; } } catch (e) { }
+    }
     return {
       team: r.team, room: rooms[r.roomId] || r.roomId, test: r.test === '是' || r.test === true,
-      index: st.index, total: total, result: r.result || '', started: r.started,
-      elapsedSec: !st.startMs ? 0 : (st.escapeSec !== undefined && st.escapeSec !== null && !running) ? st.escapeSec
+      index: st.index, total: total, result: result, started: r.started,
+      elapsedSec: !st.startMs ? 0 : capSec !== null ? capSec : (st.escapeSec !== undefined && st.escapeSec !== null && !running) ? st.escapeSec
         : Math.floor(((running ? nowMs_() : new Date(r.ended).getTime()) - st.startMs + penalty) / 1000),
       hints: st.hints, wrong: st.wrong || 0,
       phase: st.phase || 'main', skips: st.skips || 0, escapeSec: st.escapeSec === undefined ? null : st.escapeSec,
@@ -2406,6 +2429,25 @@ function roomStats_(room) {
     out.flags = puzzleFlags_(out);
     return out;
   });
+  var snapCache = {};
+  var teams = plays.map(function (r) {
+    var st; try { st = JSON.parse(r.state || '{}'); } catch (e) { st = {}; }
+    var sn = null;
+    if (st.snap) { try { sn = snapCache[st.snap] = snapCache[st.snap] || loadSnapshot_(st.snap); } catch (e) { } }
+    var total = sn ? sn.puzzles.length : 0;
+    var free = sn ? isFree_(sn) : false;
+    var limitSec = sn ? limitMs_(sn) / 1000 : 0;
+    var penalty = Number(st.penaltySec) || 0;
+    var elapsed = !st.startMs ? 0 : r.result === 'escaped' && st.escapeSec !== undefined && st.escapeSec !== null ? Number(st.escapeSec)
+      : Math.floor(((r.ended ? new Date(r.ended).getTime() : nowMs_()) - st.startMs) / 1000) + penalty;
+    // 沒有結果、時間已經超過限時：多半是關掉頁面或斷線沒回報，當作時間到
+    var status = r.result === 'escaped' ? 'escaped' : r.result === 'timeout' ? 'timeout'
+      : (limitSec && st.startMs && (nowMs_() - st.startMs) / 1000 + penalty > limitSec) ? 'timeout-unreported' : 'running';
+    var solved = r.result === 'escaped' ? total
+      : free ? (st.ps || []).filter(function (e) { return e && e.done; }).length : (Number(st.index) || 0);
+    return { team: r.team, started: r.started, ended: r.ended || '', status: status, solved: solved, total: total,
+      elapsedSec: elapsed, wrong: st.wrong || 0, hints: st.hints || 0, skips: st.skips || 0 };
+  }).reverse();
   var escaped = plays.filter(function (p) { return p.result === 'escaped'; });
   var stOf = function (p) { try { return JSON.parse(p.state || '{}'); } catch (e) { return {}; } };
   var escSecs = escaped.map(function (p) { return Number(stOf(p).escapeSec); }).filter(function (x) { return x > 0; });
@@ -2415,6 +2457,7 @@ function roomStats_(room) {
     avgEscapeMin: escSecs.length ? Math.round(escSecs.reduce(function (t, v) { return t + v; }, 0) / escSecs.length / 6) / 10 : null,
     timeLimitMin: limitMin, mode: latestSnap ? (latestSnap.room.mode || 'linear') : modeOf_(room),
     vaultTotal: vaultList.length,
+    teams: teams,
     perPuzzle: per,
     comments: ratings.filter(function (x) { return x.comment; }).map(function (x) { return x.comment; })
   };

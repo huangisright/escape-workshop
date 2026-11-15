@@ -112,3 +112,44 @@ test('批次刪除分組：一次刪多組、有謎題卡的組略過並回報�
   assert.equal(env.plain(env.gs.adminOverview(env.admin)).rooms.filter((r) => r.kind === 'group').length, 3);
   assert.match(post(env, 'adminDeleteGroups', [made[0].code, [made[2].code]]).error, /權限/);
 });
+
+test('暫時移出密室：不進檢核與材料清單、題目還留在組裡，可放回；非管理者不能操作', () => {
+  const env = H.load();
+  const g = env.plain(env.gs.adminCreateGroups(env.admin, [{ name: '第一組', members: '甲、乙' }]))[0];
+  const gRoom = env.plain(env.gs.login(g.code)).roomId;
+  const p1 = env.plain(env.gs.newPuzzle(g.code));
+  const p2 = env.plain(env.gs.newPuzzle(g.code));
+  const count = () => env.plain(env.gs.adminMaterials(env.admin)).find((x) => x.id === gRoom).puzzles.length;
+  assert.equal(count(), 2);
+  assert.equal(post(env, 'adminParkPuzzle', [env.admin, p2.id, true]).ok, true);
+  assert.equal(count(), 1, '移出後材料清單不該再列');
+  const adminView = env.plain(env.gs.adminGetRoom(env.admin, gRoom));
+  assert.equal(adminView.puzzles.length, 2, '後台仍看得到被移出的題目');
+  assert.equal(adminView.puzzles.find((x) => x.id === p2.id).parked, true);
+  const ws = env.plain(env.gs.getWorkspace(g.code));
+  assert.equal(ws.puzzles.length, 2);
+  assert.match(post(env, 'adminParkPuzzle', [g.code, p1.id, true]).error, /權限/);
+  assert.equal(post(env, 'adminParkPuzzle', [env.admin, p2.id, false]).ok, true);
+  assert.equal(count(), 2, '放回後恢復');
+});
+
+test('各組闖關紀錄：過關、答錯後時間到、中途關掉頁面都列出來', () => {
+  const env = H.load();
+  const { room } = H.publishedTeacherRoom(env, ['ANS1']);
+  const win = H.startPlay(env, room.playCode, '過關組');
+  env.gs.playAnswer(win.id, 'ANS1');
+  const lose = H.startPlay(env, room.playCode, '時間到組');
+  env.gs.playAnswer(lose.id, 'WRONG');
+  env.advance(15 * 60 + 1);
+  const ghost = H.startPlay(env, room.playCode, '關掉頁面組');
+  env.advance(60 * 60);
+  const stats = env.plain(env.gs.adminStats(env.admin, room.id));
+  const by = Object.fromEntries(stats.teams.map((t) => [t.team, t]));
+  assert.equal(by['過關組'].status, 'escaped');
+  assert.equal(by['時間到組'].wrong, 1);
+  assert.notEqual(by['時間到組'].status, 'escaped');
+  assert.equal(by['關掉頁面組'].status, 'timeout-unreported');
+  assert.equal(stats.teams.length, 3);
+  const live = env.plain(env.gs.adminLive(env.admin));
+  assert.equal(live.find((r) => r.team === '關掉頁面組').result, 'timeout');
+});

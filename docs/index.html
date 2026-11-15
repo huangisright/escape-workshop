@@ -1294,8 +1294,8 @@ function renderStudentHome() {
   ws.puzzles.forEach(function (p) { if (counts[p.author] !== undefined) counts[p.author]++; });
   if (locked) h += '<div class="banner">' + (room.status === 'approved' ? '老師已審核通過。' : '已送審，正在等老師審核。') + '內容已鎖定，要修改請找老師開放。</div>';
   h += '<div class="card"><div class="row" style="align-items:center"><div><h3 style="margin:0">' + esc(room.title || '（未命名密室）') + '</h3><div class="muted">' + statusChip(room.status) +
-    (room.published ? ' <span class="chip pub">已發布 ' + esc(room.playCode) + '</span>' : '') + ' · ' + ws.puzzles.length + ' 題 · 預估 ' +
-    ws.puzzles.reduce(function (t, p) { return t + (Number(p.estMinutes) || 0); }, 0) + ' 分鐘</div></div>' +
+    (room.published ? ' <span class="chip pub">已發布 ' + esc(room.playCode) + '</span>' : '') + ' · ' + ws.puzzles.filter(function (p) { return !p.parked; }).length + ' 題 · 預估 ' +
+    ws.puzzles.filter(function (p) { return !p.parked; }).reduce(function (t, p) { return t + (Number(p.estMinutes) || 0); }, 0) + ' 分鐘</div></div>' +
     '<div style="flex:none"><button class="btn ghost" data-act="editRoom">' + (lead && !locked ? '密室資訊（封面、故事頁、結局、心智圖）' : '看密室資訊') + '</button></div></div>';
   h += '<p class="help" style="margin:10px 0 0">組員：' + (ws.members || []).map(function (m) { return esc(m) + (m === ws.leaderName ? '★' : '') + '（' + counts[m] + ' 題）'; }).join('、') + '</p>';
   h += '<p class="help" style="margin:4px 0 0">' + (lead ? '你是組長：負責密室資訊（封面、故事頁、結局的圖）、題目順序和送審。' : '組長' + (ws.leaderName ? '「' + esc(ws.leaderName) + '」' : '') + '負責密室資訊、題目順序和送審；你負責把自己的題目做好。') + '</p></div>';
@@ -1304,7 +1304,7 @@ function renderStudentHome() {
   if (!ws.puzzles.length) h += '<p class="help">還沒有題目。每位組員按「新增一題」開始做自己的題目。</p>';
   h += '<div class="list">' + ws.puzzles.map(function (p, i) {
     return '<div class="item click" data-act="openPuzzle" data-id="' + esc(p.id) + '"><div class="big" style="font-size:22px;width:34px;color:var(--acc)">' + (i + 1) + '</div><div class="main"><div class="t">' +
-      esc(p.title || '（未命名）') + (p.mine ? ' <span class="chip mine">我的</span>' : '') + '</div><div class="m">' + esc(p.author || '') + ' · ' + kindLabel(p.kind) + ' · ' + (p.estMinutes ? p.estMinutes + ' 分鐘' : '未填時間') + (p.mine ? '' : ' · 唯讀') + '</div></div>' +
+      esc(p.title || '（未命名）') + (p.mine ? ' <span class="chip mine">我的</span>' : '') + (p.parked ? ' <span class="chip draft">暫不放入密室</span>' : '') + '</div><div class="m">' + esc(p.author || '') + ' · ' + kindLabel(p.kind) + ' · ' + (p.estMinutes ? p.estMinutes + ' 分鐘' : '未填時間') + (p.mine ? '' : ' · 唯讀') + '</div></div>' +
       sumDots(summarize(p.checks)) +
       (!locked && lead ? '<span class="noprint" style="display:flex;gap:4px"><button class="iconbtn" data-act="movePuzzle" data-id="' + esc(p.id) + '" data-dir="-1" aria-label="上移">↑</button><button class="iconbtn" data-act="movePuzzle" data-id="' + esc(p.id) + '" data-dir="1" aria-label="下移">↓</button></span>' : '') + '</div>';
   }).join('') + '</div>';
@@ -1331,8 +1331,8 @@ function renderWorkspace() {
   if (locked && !admin) h += '<div class="banner">' + (room.status === 'approved' ? '老師已審核通過。' : '已送審，正在等老師審核。') + '內容已鎖定，要修改請找老師開放。</div>';
   if (admin) h += '<div class="banner">你正在以管理者身分編輯這個密室，修改會直接生效。</div>';
   h += '<div class="card"><div class="row" style="align-items:center"><div><h3 style="margin:0">' + esc(room.title || '（未命名密室）') + '</h3><div class="muted">' + statusChip(room.status) +
-    (room.published ? ' <span class="chip pub">已發布 ' + esc(room.playCode) + '</span>' : '') + ' · ' + ws.puzzles.length + ' 題 · 預估 ' +
-    ws.puzzles.reduce(function (t, p) { return t + (Number(p.estMinutes) || 0); }, 0) + ' 分鐘</div></div>' +
+    (room.published ? ' <span class="chip pub">已發布 ' + esc(room.playCode) + '</span>' : '') + ' · ' + ws.puzzles.filter(function (p) { return !p.parked; }).length + ' 題 · 預估 ' +
+    ws.puzzles.filter(function (p) { return !p.parked; }).reduce(function (t, p) { return t + (Number(p.estMinutes) || 0); }, 0) + ' 分鐘</div></div>' +
     '<div style="flex:none"><button class="btn ghost" data-act="editRoom">密室資訊（封面、說明、結局、心智圖）</button></div></div>';
   if (members.length) h += '<p class="help" style="margin:10px 0 0">組員：' + members.map(function (m) { return esc(m) + '（' + counts[m] + ' 題）'; }).join('、') + '</p>';
   h += '</div>';
@@ -1508,6 +1508,7 @@ function renderPuzzleEditor() {
   h += '</div>';
 
   h += '<div class="btns noprint"><button class="btn ghost" data-act="previewPuzzle">👁 用玩家角度看</button>' +
+    (S.edit.mode === 'admin' && p.roomId && p.roomId !== 'BANK' ? '<button class="btn ghost" data-act="parkPuzzle">' + (p.parked ? '↩ 放回密室' : '⏸ 暫時移出密室') + '</button>' : '') +
     (!ro || S.edit.mode === 'admin' ? '<button class="btn danger" data-act="deletePuzzle">刪除這題</button>' : '') + '</div></div>';
   app.innerHTML = h;
   hydrateFiles();
@@ -2041,9 +2042,21 @@ function adminStats(roomId) {
 }
 var VERDICT_LABEL = { good: '不用改', adjust: '小修', fix: '優先修改' };
 function puzzleTag(p) { return (p.vault ? 'V' : '') + p.no; }
+function teamRecordsHtml(teams) {
+  var chip = function (t) {
+    return t.status === 'escaped' ? '<span class="chip approved">逃脫成功</span>'
+      : t.status === 'timeout' ? '<span class="chip submitted">時間到</span>'
+      : t.status === 'timeout-unreported' ? '<span class="chip submitted">時間到（沒回報）</span>' : '<span class="chip draft">進行中</span>';
+  };
+  return '<div class="card" style="overflow-x:auto"><h3>各組闖關紀錄 <span class="muted" style="font-size:13px">' + teams.length + ' 組（沒過關的也列出）</span></h3>' +
+    (teams.length ? '<table><tr><th>隊伍</th><th>開始</th><th>結果</th><th>解開</th><th>用時</th><th>答錯</th><th>提示</th><th>跳過</th></tr>' + teams.map(function (t) {
+      return '<tr><td>' + esc(t.team) + '</td><td>' + esc(String(t.started || '')) + '</td><td>' + chip(t) + '</td><td>' + t.solved + ' / ' + t.total + '</td><td>' + fmtSec(t.elapsedSec) + '</td><td>' + t.wrong + '</td><td>' + t.hints + '</td><td>' + t.skips + '</td></tr>';
+    }).join('') + '</table><p class="help" style="margin-top:8px">「時間到（沒回報）」：玩家中途關掉頁面或斷線，超過限時還沒結果，平台當作沒過關。</p>' : '<p class="muted">還沒有人玩。</p>') + '</div>';
+}
 function renderStats(roomId, d) {
   S.stats = { roomId: roomId, d: d };
   var h = topbar('數據：' + d.title, { back: 'toAdmin' }) + '<div class="wrap"><div class="card"><h3>' + esc(d.title) + '</h3><p>正式遊玩 ' + d.plays + ' 場，逃脫成功 ' + d.escaped + ' 場（試玩不列入）。' + (d.avgEscapeMin !== null && d.avgEscapeMin !== undefined ? '平均逃脫時間 ' + d.avgEscapeMin + ' 分鐘（含跳過扣時）。' : '') + '</p></div>';
+  h += teamRecordsHtml(d.teams || []);
   // 平台自己判斷的警示
   var flagged = d.perPuzzle.filter(function (p) { return (p.flags || []).some(function (f) { return f.code !== 'few'; }); });
   h += '<div class="card"><h3>自動警示</h3><p class="help" style="margin-top:0">平台依遊玩數據自動判斷，不用 AI。紅點建議優先修，黃點值得看一下；玩到的組數少於 3 組的題目先不判斷。</p>' + checksHtml(d.roomFlags || []);
@@ -2974,6 +2987,15 @@ var ACTIONS = {
     var t = ps[i]; ps[i] = ps[j]; ps[j] = t; // 先在畫面上換好，伺服器在背景存
     renderWorkspace();
     apiRaw('movePuzzle', S.code, id, dir).catch(function (e) { fail(e); showGroupHome(); });
+  },
+  parkPuzzle: function () {
+    var park = !S.puzzle.parked;
+    api('adminParkPuzzle', S.code, S.puzzle.id, park).then(function () {
+      S.puzzle.parked = park;
+      (S.ws.puzzles || []).forEach(function (x) { if (x.id === S.puzzle.id) x.parked = park; });
+      toast(park ? '已暫時移出密室，這組可以照常送審；已發布的密室要重新發布才生效' : '已放回密室');
+      renderPuzzleEditor();
+    }).catch(fail);
   },
   deletePuzzle: function () {
     confirmBox('確定要刪除「' + (S.puzzle.title || '這一題') + '」嗎？刪除後無法復原。', '刪除').then(function (ok) {

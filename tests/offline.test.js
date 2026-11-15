@@ -113,3 +113,34 @@ test('離線回傳：收下進度與事件；過期、對不上、時間離譜�
   const old = JSON.parse(JSON.stringify(payload)); old.st.v = 1;
   assert.equal(env.plain(env.gs.playSync(a.playId, old)).stale, true);
 });
+
+test('離線逃脫但很晚才回傳：平台先自動判時間到，回傳後改回逃脫', () => {
+  const env = H.load();
+  const { room: r } = room(env);
+  const a = start(env, r.playCode, '第一隊');
+  const s0 = env.plain(env.gs.playBegin(a.playId));
+  env.advance(95 * 60); // 這段時間 iPad 都沒網路，平台在限時到了之後自己結束
+  env.gs.adminLive(env.admin);
+  assert.equal(env.plain(env.gs.readAll_('Plays')).find((p) => p.id === a.playId).result, 'timeout');
+  const st = JSON.parse(JSON.stringify(s0.sync.st));
+  st.v += 1000; // 裝置斷線時版本號加 1000
+  st.escapeSec = 80 * 60;
+  const ok = env.plain(env.gs.playSync(a.playId, { st, result: 'escaped', ended: new Date().toISOString(), events: [] }));
+  assert.equal(ok.synced, true);
+  assert.equal(ok.state.result, 'escaped');
+  assert.equal(ok.state.elapsedSec, 80 * 60);
+});
+
+test('離線回傳半途進度但限時已過：收下進度並結束，結束時間是限時用完那一刻', () => {
+  const env = H.load();
+  const { room: r } = room(env);
+  const a = start(env, r.playCode, '第一隊');
+  const s0 = env.plain(env.gs.playBegin(a.playId));
+  env.advance(120 * 60);
+  const st = JSON.parse(JSON.stringify(s0.sync.st));
+  st.v += 1000;
+  const ok = env.plain(env.gs.playSync(a.playId, { st, result: '', ended: '', events: [] }));
+  assert.equal(ok.state.result, 'timeout');
+  const play = env.plain(env.gs.readAll_('Plays')).find((p) => p.id === a.playId);
+  assert.equal(new Date(play.ended).getTime(), st.startMs + 90 * 60 * 1000);
+});

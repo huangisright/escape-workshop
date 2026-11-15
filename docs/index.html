@@ -1991,7 +1991,7 @@ function loadLive() {
         : r.free && !r.result ? '已過 ' + (r.solvedCount || 0) + ' / ' + r.total + '（看第 ' + (r.index + 1) + ' 題）'
         : (r.result ? r.total : r.index + 1) + ' / ' + r.total;
       return '<tr><td>' + esc(r.team) + (r.test ? ' <span class="chip">試玩</span>' : '') + '</td><td>' + esc(r.room) + '</td><td>' + where + '</td><td>' + fmtSec(r.elapsedSec) + '</td><td>' + (r.hints || 0) + '</td><td>' + r.wrong + '</td><td>' + (r.skips || 0) + '</td><td>' +
-        (r.result === 'escaped' ? '<span class="chip approved">逃脫成功' + (r.escapeSec !== null && r.escapeSec !== undefined ? ' ' + fmtSec(r.escapeSec) : '') + '</span>' + (r.vaultTotal ? ' <span class="chip">寶物 ' + r.vaultSolved + '</span>' : '') : r.result === 'timeout' ? '<span class="chip submitted">時間到</span>' : '<span class="chip draft">進行中</span>') + '</td></tr>';
+        (r.result === 'escaped' ? '<span class="chip approved">逃脫成功' + (r.escapeSec !== null && r.escapeSec !== undefined ? ' ' + fmtSec(r.escapeSec) : '') + '</span>' + (r.vaultTotal ? ' <span class="chip">寶物 ' + r.vaultSolved + '</span>' : '') : r.result === 'timeout' ? '<span class="chip submitted">' + (r.autoEnded ? '時間到（自動結束）' : '時間到') + '</span>' : '<span class="chip draft">進行中</span>') + '</td></tr>';
     }).join('') + '</table>' : '<p class="muted">目前沒有遊戲。</p>') + '</div>';
   }).catch(function () { });
 }
@@ -2046,12 +2046,12 @@ function teamRecordsHtml(teams) {
   var chip = function (t) {
     return t.status === 'escaped' ? '<span class="chip approved">逃脫成功</span>'
       : t.status === 'timeout' ? '<span class="chip submitted">時間到</span>'
-      : t.status === 'timeout-unreported' ? '<span class="chip submitted">時間到（沒回報）</span>' : '<span class="chip draft">進行中</span>';
+      : t.status === 'timeout-auto' || t.status === 'timeout-unreported' ? '<span class="chip submitted">時間到（自動結束）</span>' : '<span class="chip draft">進行中</span>';
   };
   return '<div class="card" style="overflow-x:auto"><h3>各組闖關紀錄 <span class="muted" style="font-size:13px">' + teams.length + ' 組（沒過關的也列出）</span></h3>' +
     (teams.length ? '<table><tr><th>隊伍</th><th>開始</th><th>結果</th><th>解開</th><th>用時</th><th>答錯</th><th>提示</th><th>跳過</th></tr>' + teams.map(function (t) {
       return '<tr><td>' + esc(t.team) + '</td><td>' + esc(String(t.started || '')) + '</td><td>' + chip(t) + '</td><td>' + t.solved + ' / ' + t.total + '</td><td>' + fmtSec(t.elapsedSec) + '</td><td>' + t.wrong + '</td><td>' + t.hints + '</td><td>' + t.skips + '</td></tr>';
-    }).join('') + '</table><p class="help" style="margin-top:8px">「時間到（沒回報）」：玩家中途關掉頁面或斷線，超過限時還沒結果，平台當作沒過關。</p>' : '<p class="muted">還沒有人玩。</p>') + '</div>';
+    }).join('') + '</table><p class="help" style="margin-top:8px">「時間到（自動結束）」：玩家中途關掉頁面或斷線，限時一到平台自己結束這場、當作沒過關。用時最多就是限時。</p>' : '<p class="muted">還沒有人玩。</p>') + '</div>';
 }
 function renderStats(roomId, d) {
   S.stats = { roomId: roomId, d: d };

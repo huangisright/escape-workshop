@@ -1486,21 +1486,53 @@ function timeoutDue_(r) {
   return elapsedMs_(r) > limitMs_(loadSnapshot_(r.st.snap));
 }
 
-function checkTimeout_(r) {
+/* ---------- 時間到自動結束 ----------
+ * 限時一到這場就結束，不必等玩家的頁面回報（關掉分頁、重新整理後開了新局、iPad 沒電都一樣）。
+ * 結束時間一律記成「限時用完的那一刻」（開始＋限時−跳過扣時），不是後來誰剛好看到的時間，
+ * 所以紀錄上的用時最多就是限時，不會出現活動結束了還在計時。
+ * 誰來結束：玩家頁面倒數到 0 會問伺服器（checkTimeout_）；老師打開即時狀況、遊玩數據、下載分析包時，
+ * 也會把超時還沒結束的場次一起結束（sweepTimeouts_，記上 autoEnded），試算表裡的紀錄就跟著正確。
+ * 離線的 iPad 之後回傳時，伺服器照樣收它的進度（裝置上的版本號一定比較大）：它在限時內逃脫就改成逃脫。
+ */
+function deadlineMs_(r, snap) { return Number(r.st.startMs) + limitMs_(snap) - (Number(r.st.penaltySec) || 0) * 1000; }
+
+function checkTimeout_(r, auto) {
   if (!r.st.startMs) return;
   var snap = loadSnapshot_(r.st.snap);
   if (elapsedMs_(r) <= limitMs_(snap)) return;
+  var dl = deadlineMs_(r, snap);
   if (!r.result) {
     r.result = 'timeout';
-    r.ended = nowStr_();
+    r.ended = new Date(dl).toISOString();
+    if (auto) r.st.autoEnded = true;
     savePlay_(r);
     var p = current_(snap, r.st);
-    logEvent_(r, p ? p.id : '', 'end', 'timeout', Math.round((nowMs_() - r.st.puzzleStart) / 1000));
+    logEvent_(r, p ? p.id : '', 'end', 'timeout', Math.max(0, Math.round((dl - (r.st.puzzleStart || r.st.startMs)) / 1000)));
   } else if (active_(r)) {
     r.st.phase = 'done';
+    if (auto) r.st.autoEnded = true;
     savePlay_(r);
-    logEvent_(r, '', 'vault-end', 'timeout', Math.round(elapsedMs_(r) / 1000));
+    logEvent_(r, '', 'vault-end', 'timeout', Math.round(limitMs_(snap) / 1000));
   }
+}
+
+/** 把所有超過限時、還沒結束的場次結束掉。回傳結束了幾場。 */
+function sweepTimeouts_() {
+  var now = nowMs_(), snaps = {}, due = [];
+  readAll_('Plays').forEach(function (r) {
+    if (!r.started || (r.result && r.result !== 'escaped')) return;
+    var st; try { st = JSON.parse(r.state || '{}'); } catch (e) { return; }
+    if (!st.startMs || (r.result === 'escaped' && st.phase !== 'vault')) return;
+    var sn; try { sn = snaps[st.snap] = snaps[st.snap] || loadSnapshot_(st.snap); } catch (e) { return; }
+    if (now - st.startMs + (Number(st.penaltySec) || 0) * 1000 > limitMs_(sn)) due.push(r.id);
+  });
+  if (!due.length) return 0;
+  withLock_(function () {
+    due.forEach(function (id) {
+      try { var r = findPlay_(id); if (timeoutDue_(r)) checkTimeout_(r, true); } catch (e) { }
+    });
+  });
+  return due.length;
 }
 
 function stateOf_(r, havePuzzleId) {
@@ -1793,7 +1825,10 @@ function playSync(playId, payload) {
     r.st.phase = result ? 'done' : 'main';
     r.result = result;
     r.ended = result ? (String(payload.ended || '') || nowStr_()) : '';
+    // 時間到的結束時間記成限時用完那一刻（iPad 可能晚很久才發現時間到）
+    if (result === 'timeout') r.ended = new Date(deadlineMs_(r, snap)).toISOString();
     savePlay_(r);
+    if (!result) checkTimeout_(r); // 回傳的是半途進度，但限時其實已經過了
     (payload.events || []).slice(0, 600).forEach(function (e) {
       appendRow_('Events', {
         ts: String(e.ts || nowStr_()), playId: r.id, roomId: r.roomId, puzzleId: String(e.puzzleId || ''),
@@ -2334,6 +2369,7 @@ function adminMaterials(code) {
 function adminLive(code) {
   var a = account_(code);
   needRole_(a, ['admin']);
+  sweepTimeouts_();
   var rooms = {};
   allDocs_('Rooms').forEach(function (r) { rooms[r.id] = r.title; });
   var since = nowMs_() - 3 * 3600 * 1000;
@@ -2341,19 +2377,19 @@ function adminLive(code) {
     return r.started && new Date(r.started).getTime() > since;
   }).map(function (r) {
     var st = JSON.parse(r.state || '{}');
-    var total = 0, vaultTotal = 0, free = false;
-    try { var sn = loadSnapshot_(st.snap); total = sn.puzzles.length; vaultTotal = (sn.vault || []).length; free = isFree_(sn); } catch (e) { }
+    var total = 0, vaultTotal = 0, free = false, limSec = 0;
+    try { var sn = loadSnapshot_(st.snap); total = sn.puzzles.length; vaultTotal = (sn.vault || []).length; free = isFree_(sn); limSec = limitMs_(sn) / 1000; } catch (e) { }
     var running = !r.result || (r.result === 'escaped' && st.phase === 'vault');
     var penalty = (Number(st.penaltySec) || 0) * 1000;
-    var result = r.result || '', capSec = null;
-    if (!result && st.startMs) {
-      try { var lim = limitMs_(loadSnapshot_(st.snap)); if (nowMs_() - st.startMs + penalty > lim) { result = 'timeout'; capSec = lim / 1000; } } catch (e) { }
-    }
+    var result = r.result || '';
+    if (!result && st.startMs && limSec && (nowMs_() - st.startMs + penalty) / 1000 > limSec) result = 'timeout';
+    var sec = !st.startMs ? 0 : (st.escapeSec !== undefined && st.escapeSec !== null && !running) ? st.escapeSec
+      : Math.floor(((running || !r.ended ? nowMs_() : new Date(r.ended).getTime()) - st.startMs + penalty) / 1000);
+    if (limSec) sec = Math.min(sec, limSec); // 用時最多就是限時
     return {
       team: r.team, room: rooms[r.roomId] || r.roomId, test: r.test === '是' || r.test === true,
-      index: st.index, total: total, result: result, started: r.started,
-      elapsedSec: !st.startMs ? 0 : capSec !== null ? capSec : (st.escapeSec !== undefined && st.escapeSec !== null && !running) ? st.escapeSec
-        : Math.floor(((running ? nowMs_() : new Date(r.ended).getTime()) - st.startMs + penalty) / 1000),
+      index: st.index, total: total, result: result, started: r.started, autoEnded: !!st.autoEnded,
+      elapsedSec: Math.max(0, sec),
       hints: st.hints, wrong: st.wrong || 0,
       phase: st.phase || 'main', skips: st.skips || 0, escapeSec: st.escapeSec === undefined ? null : st.escapeSec,
       vaultIndex: st.vi || 0, vaultSolved: st.vaultSolved || 0, vaultTotal: vaultTotal,
@@ -2376,6 +2412,7 @@ function adminStats(code, roomId) {
 
 function roomStats_(room) {
   var roomId = room.id;
+  sweepTimeouts_();
   var plays = readAll_('Plays').filter(function (r) { return r.roomId === roomId && !(r.test === '是' || r.test === true) && r.started; });
   var playIds = {};
   plays.forEach(function (p) { playIds[p.id] = 1; });
@@ -2440,9 +2477,10 @@ function roomStats_(room) {
     var penalty = Number(st.penaltySec) || 0;
     var elapsed = !st.startMs ? 0 : r.result === 'escaped' && st.escapeSec !== undefined && st.escapeSec !== null ? Number(st.escapeSec)
       : Math.floor(((r.ended ? new Date(r.ended).getTime() : nowMs_()) - st.startMs) / 1000) + penalty;
-    // 沒有結果、時間已經超過限時：多半是關掉頁面或斷線沒回報，當作時間到
-    var status = r.result === 'escaped' ? 'escaped' : r.result === 'timeout' ? 'timeout'
-      : (limitSec && st.startMs && (nowMs_() - st.startMs) / 1000 + penalty > limitSec) ? 'timeout-unreported' : 'running';
+    if (limitSec) elapsed = Math.max(0, Math.min(elapsed, limitSec)); // 用時最多就是限時（舊紀錄的結束時間可能很晚才記）
+    // autoEnded：玩家頁面沒回報（關掉頁面、斷線），平台在限時到了之後自己結束
+    var status = r.result === 'escaped' ? 'escaped' : r.result === 'timeout' ? (st.autoEnded ? 'timeout-auto' : 'timeout')
+      : (limitSec && st.startMs && (nowMs_() - st.startMs) / 1000 + penalty > limitSec) ? 'timeout-auto' : 'running';
     var solved = r.result === 'escaped' ? total
       : free ? (st.ps || []).filter(function (e) { return e && e.done; }).length : (Number(st.index) || 0);
     return { team: r.team, started: r.started, ended: r.ended || '', status: status, solved: solved, total: total,

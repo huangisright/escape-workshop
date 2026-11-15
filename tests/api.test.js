@@ -148,8 +148,52 @@ test('各組闖關紀錄：過關、答錯後時間到、中途關掉頁面都�
   assert.equal(by['過關組'].status, 'escaped');
   assert.equal(by['時間到組'].wrong, 1);
   assert.notEqual(by['時間到組'].status, 'escaped');
-  assert.equal(by['關掉頁面組'].status, 'timeout-unreported');
+  assert.equal(by['關掉頁面組'].status, 'timeout-auto');
+  assert.equal(by['關掉頁面組'].elapsedSec, 15 * 60, '用時最多就是限時');
   assert.equal(stats.teams.length, 3);
   const live = env.plain(env.gs.adminLive(env.admin));
   assert.equal(live.find((r) => r.team === '關掉頁面組').result, 'timeout');
+});
+
+test('限時到了玩家沒回報：老師一看後台就自動結束，結束時間記在限時用完那一刻', () => {
+  const env = H.load();
+  const { room } = H.publishedTeacherRoom(env, ['ANS1', 'ANS2']);
+  const ghost = H.startPlay(env, room.playCode, '關掉頁面組');
+  env.gs.playAnswer(ghost.id, 'ANS1');
+  const startMs = env.plain(env.gs.playState(ghost.id, '')).sync.st.startMs;
+  env.advance(2 * 3600); // 活動早就結束了
+  const live = env.plain(env.gs.adminLive(env.admin));
+  const row = live.find((r) => r.team === '關掉頁面組');
+  assert.equal(row.result, 'timeout');
+  assert.equal(row.autoEnded, true);
+  assert.equal(row.elapsedSec, 15 * 60);
+  // 試算表裡真的寫進結果，不是只有畫面上算
+  const play = env.plain(env.gs.readAll_('Plays')).find((p) => p.id === ghost.id);
+  assert.equal(play.result, 'timeout');
+  assert.equal(new Date(play.ended).getTime(), startMs + 15 * 60 * 1000);
+  const ends = env.plain(env.gs.readAll_('Events')).filter((e) => e.playId === ghost.id && e.type === 'end');
+  assert.equal(ends.length, 1);
+  assert.equal(ends[0].value, 'timeout');
+  // 再看一次不會重複結束
+  env.gs.adminStats(env.admin, room.id);
+  assert.equal(env.plain(env.gs.readAll_('Events')).filter((e) => e.playId === ghost.id && e.type === 'end').length, 1);
+  // 玩家之後重開頁面：直接看到時間到
+  const st = env.plain(env.gs.playState(ghost.id, ''));
+  assert.equal(st.over, true);
+  assert.equal(st.result, 'timeout');
+  assert.equal(st.remainingSec, 0);
+});
+
+test('玩家頁面很晚才回報時間到：結束時間仍記在限時用完那一刻', () => {
+  const env = H.load();
+  const { room } = H.publishedTeacherRoom(env, ['ANS1']);
+  const p = H.startPlay(env, room.playCode, '晚回報組');
+  const startMs = env.plain(env.gs.playState(p.id, '')).sync.st.startMs;
+  env.advance(3 * 3600);
+  env.gs.playState(p.id, '');
+  const play = env.plain(env.gs.readAll_('Plays')).find((x) => x.id === p.id);
+  assert.equal(new Date(play.ended).getTime(), startMs + 15 * 60 * 1000);
+  const t = env.plain(env.gs.adminStats(env.admin, room.id)).teams.find((x) => x.team === '晚回報組');
+  assert.equal(t.status, 'timeout');
+  assert.equal(t.elapsedSec, 15 * 60);
 });

@@ -1506,7 +1506,7 @@ function renderPuzzleEditor() {
   h += '</div>';
 
   h += '<div class="btns noprint"><button class="btn ghost" data-act="previewPuzzle">👁 用玩家角度看</button>' +
-    (!ro && S.edit.mode !== 'admin' ? '<button class="btn danger" data-act="deletePuzzle">刪除這題</button>' : '') + '</div></div>';
+    (!ro || S.edit.mode === 'admin' ? '<button class="btn danger" data-act="deletePuzzle">刪除這題</button>' : '') + '</div></div>';
   app.innerHTML = h;
   hydrateFiles();
 }
